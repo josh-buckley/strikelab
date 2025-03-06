@@ -89,15 +89,21 @@ export default function Login() {
       const wasJustSubscribed = await checkJustSubscribedFlag();
       
       if (wasJustSubscribed) {
-        console.log('Login: User has just subscribed flag set, clearing it and checking subscription status');
+        console.log('Login: User has just subscribed flag set, verifying subscription status');
         
-        // If this was after a subscription, force check subscription status again
-        // This is important for connecting the anonymous purchase to the user account
-        await checkSubscription();
+        // Verify subscription is properly linked
+        const subscriptionLinked = await checkSubscription();
         
-        // Clear the flag after successful login and subscription check
-        await clearJustSubscribedFlag();
-        console.log('Login: justSubscribed flag cleared after successful login');
+        if (subscriptionLinked) {
+          console.log('Login: Subscription successfully linked to user account');
+          // Only clear flag after successful verification
+          await clearJustSubscribedFlag();
+        } else {
+          console.error('Login: Failed to verify subscription after sign in');
+          // Don't clear flag - this allows for retry
+          setError('Unable to verify subscription. Please try again or contact support.');
+          return;
+        }
       } else {
         console.log('Login: User did not have justSubscribed flag set');
       }
@@ -371,9 +377,21 @@ export default function Login() {
       // Check if this was after a subscription
       const wasJustSubscribed = await checkJustSubscribedFlag();
       if (wasJustSubscribed) {
-        console.log('Login: User has just subscribed flag set, checking subscription status');
-        await checkSubscription();
-        await clearJustSubscribedFlag();
+        console.log('Login: User has just subscribed flag set, verifying subscription status');
+        
+        // Verify subscription is properly linked
+        const subscriptionLinked = await checkSubscription();
+        
+        if (subscriptionLinked) {
+          console.log('Login: Subscription successfully linked to user account');
+          // Only clear flag after successful verification
+          await clearJustSubscribedFlag();
+        } else {
+          console.error('Login: Failed to verify subscription after Apple sign in');
+          // Don't clear flag - this allows for retry
+          setError('Unable to verify subscription. Please try again or contact support.');
+          return;
+        }
       }
       
       // After successful Apple sign-in, mark onboarding as completed for subscribers

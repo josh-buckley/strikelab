@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedText } from '@/components/ThemedText';
@@ -13,12 +13,20 @@ export default function PaywallScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const [hasShownPaywall, setHasShownPaywall] = useState(false);
+  const [buttonText, setButtonText] = useState('Continue to Login');
   const params = useLocalSearchParams();
   
   // Track if this is from onboarding completion
   const fromOnboarding = params.fromOnboarding === 'true';
 
   console.log('PaywallScreen: Rendered with params:', { fromOnboarding, params });
+
+  // Function to handle redirection to login
+  const proceedToLogin = async () => {
+    console.log('PaywallScreen: Proceeding to login screen');
+    await setJustSubscribedFlag();
+    router.replace(ROUTES.AUTH.LOGIN);
+  };
 
   // Show paywall when this screen is explicitly navigated to from onboarding
   useEffect(() => {
@@ -30,51 +38,41 @@ export default function PaywallScreen() {
         if (!hasShownPaywall && !loading && fromOnboarding) {
           console.log('PaywallScreen: Showing paywall from onboarding');
           setHasShownPaywall(true);
+          setButtonText('Processing Purchase...');
           
           // Use the test_paywall identifier or whatever is appropriate
           await presentPaywall('test_paywall');
           
-          // For sandbox testing, we'll automatically redirect after the paywall completes
+          // After paywall is closed, check subscription status
           console.log('PaywallScreen: Paywall interaction completed, checking subscription and flags');
           
-          // After paywall is closed, check if user subscribed OR if the justSubscribed flag is set
-          // This gives two chances for the redirect to work
+          // Check subscription status and redirect accordingly
           if (isSubscribed) {
-            console.log('PaywallScreen: User is now showing as subscribed');
-            // Let layout handle navigation
+            console.log('PaywallScreen: User is now showing as subscribed, redirecting to login');
+            setButtonText('Subscription Active - Continue to Login');
+            proceedToLogin();
           } else {
             console.log('PaywallScreen: Checking justSubscribed flag');
             const checkIfSubscribed = await checkJustSubscribedFlag();
             if (checkIfSubscribed) {
-              console.log('PaywallScreen: justSubscribed flag is set');
+              console.log('PaywallScreen: justSubscribed flag is set, redirecting to login');
+              setButtonText('Subscription Active - Continue to Login');
+              proceedToLogin();
             } else {
-              // SANDBOX TESTING ONLY: Set flag after paywall interaction
-              console.log('PaywallScreen: SANDBOX MODE - Setting subscription flag');
-              await setJustSubscribedFlag();
+              setButtonText('Continue to Login');
             }
           }
         }
       } catch (error) {
         console.error('PaywallScreen: Error showing paywall:', error);
-        // Even if there's an error, try to redirect
-        router.replace(ROUTES.AUTH.LOGIN);
+        setButtonText('Continue to Login');
       }
     };
 
     // If user is already subscribed, set flag and redirect to login
     if (isSubscribed) {
-      const handleExistingSubscription = async () => {
-        console.log('PaywallScreen: User already subscribed, setting flag and redirecting to login');
-        await setJustSubscribedFlag();
-        
-        // Add a small delay before navigation
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        console.log('PaywallScreen: Redirecting to login for existing subscriber');
-        router.replace(ROUTES.AUTH.LOGIN);
-      };
-      
-      handleExistingSubscription();
+      setButtonText('Subscription Active - Continue to Login');
+      proceedToLogin();
     } else if (!loading && !hasShownPaywall && fromOnboarding) {
       // Only show paywall if we're not loading, haven't shown it yet, and coming from onboarding
       showPaywall();
@@ -88,15 +86,40 @@ export default function PaywallScreen() {
   return (
     <ThemedView style={styles.container}>
       {loading ? (
-        <ActivityIndicator size="large" color={colorScheme === 'dark' ? Colors.light.tint : Colors.dark.tint} />
+        <>
+          <ActivityIndicator size="large" color={colorScheme === 'dark' ? Colors.light.tint : Colors.dark.tint} />
+          <TouchableOpacity
+            style={[
+              styles.continueButton,
+              { backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint }
+            ]}
+            onPress={proceedToLogin}
+          >
+            <ThemedText style={styles.buttonText}>
+              {buttonText}
+            </ThemedText>
+          </TouchableOpacity>
+        </>
       ) : (
         <View style={styles.content}>
           <ThemedText style={styles.title}>
             Unlock StrikeLab Premium
           </ThemedText>
           <ThemedText style={styles.subtitle}>
-            Loading subscription options...
+            {isSubscribed ? 'Subscription Active' : 'Loading subscription options...'}
           </ThemedText>
+          
+          <TouchableOpacity
+            style={[
+              styles.continueButton,
+              { backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint }
+            ]}
+            onPress={proceedToLogin}
+          >
+            <ThemedText style={styles.buttonText}>
+              {buttonText}
+            </ThemedText>
+          </TouchableOpacity>
         </View>
       )}
     </ThemedView>
@@ -123,5 +146,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     opacity: 0.8,
+    marginBottom: 30,
+  },
+  continueButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 20,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  buttonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
 }); 
