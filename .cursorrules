@@ -1,0 +1,89 @@
+# StrikeLab - Product Requirements Document
+
+## Overview
+StrikeLab is a mobile application for tracking muay thai/kickboxing training progress. The app gamifies training by visualizing progression through body part-specific levels while maintaining serious utility as a workout tracking tool.
+
+## Core Features
+
+### User Configuration
+- Initial stance selection (orthodox/southpaw)
+- Email-based authentication via Supabase
+- Basic profile management
+
+### Main Interface
+- Character visualization in fighting stance
+- Body parts tracked: feet, shins, knees, hands, elbows, ribs
+- Visual progression system:
+  - Levels 1-100 for each body part
+  - Increasing color vibrancy with progression
+  - Special effects at milestone levels (10, 20, 30, etc.)
+- Create/Log workout button in bottom right
+
+### Workout Creation
+- Technique selection from categorized lists:
+  - Punches (jab, cross, hooks, uppercuts)
+  - Kicks (teep, roundhouse, etc.)
+  - Knees
+  - Elbows
+  - Sparring as special category
+- Combo builder functionality:
+  - Add/remove techniques
+  - Drag-and-drop reordering
+  - Duplicate button for variations
+- Structure settings:
+  - Toggle between time-based (rounds/minutes) and rep-based
+  - Training environment selection (heavy bag, thai pads, focus mitts, partner drills, shadow boxing)
+- Save workout template for reuse
+
+### Workout Logging
+- Select from saved workouts
+- Mark rounds as complete/incomplete
+- For sparring:
+  - Intensity selection (Technical 40%, Light 60%, Medium 80%, Hard 100%)
+- Post-workout notes field
+- Training environment confirmation
+
+### Progress System
+- XP calculation based on:
+  - Technique base values
+  - Volume completed
+  - Sparring intensity for sparring sessions
+- Diminishing returns for multiple daily sessions:
+  - First workout: 100% XP
+  - Second: 50% XP
+  - Third: 25% XP
+  - Fourth+: 10%
+- Daily reset at midnight
+- Exponential level progression
+
+### History/Review
+- Chronological list of completed workouts
+- Filter by specific techniques
+- View associated workout notes
+
+### Coach AI (v1)
+- Basic technique advice
+- Training pattern analysis
+- Form feedback from still images
+
+## Technical Stack
+- Frontend: React Native with Expo
+- Backend: Supabase
+- Authentication: Supabase Auth
+- State Management: React Context (initially)
+
+
+## V1 Scope Limitations
+- Online-only functionality
+- No social/sharing features
+- No custom technique creation
+- No video analysis in AI coach
+- No backup/export functionality
+
+## Future Considerations
+- Offline mode
+- Default workout templates
+- Achievement system
+- Recovery tracking
+- Training partner features
+- Workout sharing functionality

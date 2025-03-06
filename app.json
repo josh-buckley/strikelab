@@ -5,17 +5,38 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "strikelab",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "usesAppleSignIn": true,
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition for voice-controlled workout logging.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone for voice-controlled workout logging.",
+        "SKPaymentQueue": true,
+        "UIBackgroundModes": ["remote-notification"],
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "strikelab"
+            ]
+          }
+        ]
+      },
+      "bundleIdentifier": "com.joshbuckley.strikelab",
+      "associatedDomains": ["applinks:api.superwall.me"]
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.joshbuckley.strikelab"
     },
     "web": {
       "bundler": "metro",
@@ -27,15 +48,34 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/splash-logo.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#1c1c1e",
+          "imageResizeMode": "contain",
+          "splashScreenBackground": "#1c1c1e"
         }
-      ]
+      ],
+      "expo-speech-recognition",
+      "expo-apple-authentication",
+      "./plugins/withSuperwall"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "tsconfigPaths": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "8c658c00-ac1f-4693-9a56-2a5e393aae98"
+      }
+    },
+    "owner": "josh-buckley",
+    "splash": {
+      "image": "./assets/images/splash-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1c1c1e"
     }
   }
 }

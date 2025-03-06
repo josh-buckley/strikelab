@@ -5,6 +5,7 @@
 
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
+const gold = '#FFD700';
 
 export const Colors = {
   light: {
@@ -14,13 +15,21 @@ export const Colors = {
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
+    card: '#F1F3F5',
+    textSecondary: '#687076',
   },
   dark: {
     text: '#ECEDEE',
     background: '#151718',
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
+    icon: '#A1A1AA',
+    tabIconDefault: '#A1A1AA',
     tabIconSelected: tintColorDark,
+    card: '#1F2123',
+    textSecondary: '#A1A1AA',
   },
-};
+  gold,
+} as const;
+
+export type ColorScheme = keyof typeof Colors;
+export type ThemeColors = typeof Colors[ColorScheme];
