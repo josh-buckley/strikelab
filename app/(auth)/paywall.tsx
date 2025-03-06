@@ -40,20 +40,17 @@ export default function PaywallScreen() {
           // After paywall is closed, check if user subscribed OR if the justSubscribed flag is set
           // This gives two chances for the redirect to work
           if (isSubscribed) {
-            console.log('PaywallScreen: User is now showing as subscribed, redirecting to login');
-            router.replace(ROUTES.AUTH.LOGIN);
+            console.log('PaywallScreen: User is now showing as subscribed');
+            // Let layout handle navigation
           } else {
             console.log('PaywallScreen: Checking justSubscribed flag');
             const checkIfSubscribed = await checkJustSubscribedFlag();
             if (checkIfSubscribed) {
-              console.log('PaywallScreen: justSubscribed flag is set, redirecting to login');
-              router.replace(ROUTES.AUTH.LOGIN);
+              console.log('PaywallScreen: justSubscribed flag is set');
             } else {
-              // SANDBOX TESTING ONLY: We'll redirect to login after a delay
-              // This simulates a successful purchase for testing even if RevenueCat fails
-              console.log('PaywallScreen: SANDBOX MODE - Redirecting to login after paywall interaction');
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              router.replace(ROUTES.AUTH.LOGIN);
+              // SANDBOX TESTING ONLY: Set flag after paywall interaction
+              console.log('PaywallScreen: SANDBOX MODE - Setting subscription flag');
+              await setJustSubscribedFlag();
             }
           }
         }

@@ -955,9 +955,15 @@ export default function Onboarding() {
         params: { fromOnboarding: 'true' }
       });
       return;
-    } else {
-      setCurrentScreen(prev => prev + 1);
     }
+
+    // Handle the "Just starting" case
+    if (SCREENS[currentScreen].isTypewriter && typewriterState.selectedOption === 'Just starting') {
+      setCurrentScreen(prev => prev + 2); // Skip the next screen
+      return;
+    }
+    
+    setCurrentScreen(prev => prev + 1);
   };
 
   const handleAnswerSelect = (screenId: string, answerIndex: number) => {
@@ -1202,12 +1208,7 @@ export default function Onboarding() {
                         ]}
                         onPress={() => {
                           setTypewriterState(prev => ({ ...prev, selectedOption: option }));
-                          if (option === 'Just starting') {
-                            // Skip experience length screen
-                            setCurrentScreen(prev => prev + 2);
-                          } else {
-                            handleNext();
-                          }
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                         }}
                       >
                         <ThemedText style={[
@@ -1230,6 +1231,16 @@ export default function Onboarding() {
 
   const isNextDisabled = () => {
     const currentScreenData = SCREENS[currentScreen];
+    
+    if (currentScreenData.isTypewriter) {
+      const currentLine = currentScreenData.typewriterData?.lines[typewriterState.currentLine];
+      if (currentLine?.options) {
+        return !typewriterState.selectedOption;
+      }
+      if (currentLine?.isInput) {
+        return !typewriterState.name.trim();
+      }
+    }
     
     if (currentScreenData.isInput) {
       return !inputAnswer.trim();
