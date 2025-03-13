@@ -2,22 +2,25 @@
   "images": [
     {
       "idiom": "universal",
-      "filename": "splashscreen.png",
+      "filename": "splash.gif",
       "scale": "1x"
     },
     {
       "idiom": "universal",
-      "filename": "splashscreen@2x.png",
+      "filename": "splash.gif",
       "scale": "2x"
     },
     {
       "idiom": "universal",
-      "filename": "splashscreen@3x.png",
+      "filename": "splash.gif",
       "scale": "3x"
     }
   ],
   "info": {
     "version": 1,
     "author": "xcode"
+  },
+  "properties": {
+    "preserves-vector-representation": false
   }
 }

@@ -146,10 +146,10 @@ const SCREENS: OnboardingScreen[] = [
         { 
           text: '', 
           options: [
-            '"I\'m not improving like I used to"',
-            '"My skills aren\'t developing as fast as others"',
-            '"I\'m training hard but improving slow"',
-            '"I\'m not reaching my potential"'
+            'I\'m not improving like I used to',
+            'My skills aren\'t developing as fast as others',
+            'I\'m training hard but improving slow',
+            'I\'m not reaching my potential'
           ]
         }
       ]

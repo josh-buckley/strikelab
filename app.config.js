@@ -18,13 +18,13 @@ export default ({ config }) => {
     ios: {
       ...existingConfig.ios,
       splash: {
-        image: './assets/images/splash-logo.png',
-        imageResizeMode: 'contain',
-        resizeMode: 'contain',
+        image: './assets/images/splash.gif',
+        imageResizeMode: 'cover',
+        resizeMode: 'cover',
         backgroundColor: '#1c1c1e',
         dark: {
-          image: './assets/images/splash-logo.png',
-          resizeMode: 'contain',
+          image: './assets/images/splash.gif',
+          resizeMode: 'cover',
           backgroundColor: '#1c1c1e'
         }
       }

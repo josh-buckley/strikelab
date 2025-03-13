@@ -88,37 +88,27 @@ export default function PaywallScreen() {
       {loading ? (
         <>
           <ActivityIndicator size="large" color={colorScheme === 'dark' ? Colors.light.tint : Colors.dark.tint} />
-          <TouchableOpacity
-            style={[
-              styles.continueButton,
-              { backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint }
-            ]}
+          <TouchableOpacity 
+            style={styles.loginButton} 
             onPress={proceedToLogin}
           >
-            <ThemedText style={styles.buttonText}>
-              {buttonText}
-            </ThemedText>
+            <ThemedText style={styles.loginButtonText}>Continue to Login</ThemedText>
           </TouchableOpacity>
         </>
       ) : (
         <View style={styles.content}>
-          <ThemedText style={styles.title}>
-            Unlock StrikeLab Premium
-          </ThemedText>
-          <ThemedText style={styles.subtitle}>
-            {isSubscribed ? 'Subscription Active' : 'Loading subscription options...'}
-          </ThemedText>
+          {/* StrikeLab header with Welcome text */}
+          <ThemedView style={styles.header}>
+            <ThemedText type="title" style={[styles.title, { textDecorationLine: 'line-through', textDecorationColor: '#FFD700' }]}>
+              welcome
+            </ThemedText>
+          </ThemedView>
           
-          <TouchableOpacity
-            style={[
-              styles.continueButton,
-              { backgroundColor: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint }
-            ]}
+          <TouchableOpacity 
+            style={styles.loginButton} 
             onPress={proceedToLogin}
           >
-            <ThemedText style={styles.buttonText}>
-              {buttonText}
-            </ThemedText>
+            <ThemedText style={styles.loginButtonText}>Continue to Login</ThemedText>
           </TouchableOpacity>
         </View>
       )}
@@ -136,29 +126,33 @@ const styles = StyleSheet.create({
   content: {
     alignItems: 'center',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.8,
-    marginBottom: 30,
-  },
-  continueButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 20,
-    minWidth: 200,
+  // Header styles from login.tsx
+  header: {
     alignItems: 'center',
+    marginBottom: 20,
   },
-  buttonText: {
-    fontSize: 16,
+  title: {
+    fontSize: 42,
     fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  loginButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    marginTop: 10, // Reduced from 20 to move the button up
+    minWidth: 200,
+  },
+  loginButtonText: {
+    fontSize: 16,
+    fontFamily: 'PoppinsSemiBold',
     color: '#FFFFFF',
   },
 }); 

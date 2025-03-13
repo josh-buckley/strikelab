@@ -26,7 +26,12 @@
         ]
       },
       "bundleIdentifier": "com.joshbuckley.strikelab",
-      "associatedDomains": ["applinks:api.superwall.me"]
+      "associatedDomains": ["applinks:api.superwall.me"],
+      "splash": {
+        "image": "./assets/images/splash.gif",
+        "resizeMode": "cover",
+        "backgroundColor": "#1c1c1e"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -48,10 +53,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-logo.png",
-          "resizeMode": "contain",
+          "image": "./assets/images/splash.gif",
+          "resizeMode": "cover",
           "backgroundColor": "#1c1c1e",
-          "imageResizeMode": "contain",
+          "imageResizeMode": "cover",
           "splashScreenBackground": "#1c1c1e"
         }
       ],

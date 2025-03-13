@@ -635,9 +635,6 @@ export default function CoachScreen() {
               alignItems: 'center'
             }}
           >
-            <TouchableOpacity style={{ padding: 8 }} onPress={pickImage}>
-              <IconSymbol name="plus" size={20} color={colors.text} />
-            </TouchableOpacity>
             <View style={{ flex: 1, marginHorizontal: 8 }}>
               {selectedImage ? (
                 <View style={{ 
