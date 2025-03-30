@@ -23,28 +23,28 @@ export default function Login() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { isSubscribed, presentPaywall, clearJustSubscribedFlag, checkJustSubscribedFlag, checkSubscription } = usePaywall();
-  const { session, markOnboardingCompleted } = useAuth();
+  const { presentPaywall, isSubscribed } = usePaywall();
+  const { markOnboardingCompleted } = useAuth();
 
-  // Clear the justSubscribed flag when a session is established
+  // New useEffect to present paywall on mount
   useEffect(() => {
-    if (session) {
-      console.log('Login: Session established, clearing justSubscribed flag');
-      clearJustSubscribedFlag();
-      
-      // If user is subscribed, also mark onboarding as completed to prevent redirection
-      if (isSubscribed) {
-        console.log('Login: User is subscribed, marking onboarding as completed');
-        markOnboardingCompleted().catch(err => 
-          console.error('Failed to mark onboarding completed:', err)
-        );
+    const showPaywall = async () => {
+      console.log('Login: Component mounted, attempting to present paywall');
+      try {
+        await presentPaywall('test_paywall');
+        console.log('Login: Paywall presentation finished (succeeded or dismissed).');
+      } catch (paywallError) {
+        console.error('Login: Error presenting paywall on mount:', paywallError);
+        // Decide if an error message should be shown to the user
+        // setError('Could not load subscription options. Please try logging in.');
       }
-    }
-  }, [session, isSubscribed]);
+    };
 
-  // Remove the redirect for unsubscribed users
-  // We now want users to be able to log in after subscribing
-  // The layout will handle redirecting unsubscribed users to the paywall after login
+    // Run the function to show the paywall
+    showPaywall();
+    
+    // Empty dependency array ensures this runs only once on mount
+  }, []); // Removed presentPaywall from dependencies as it's stable from context
 
   const handleTestPaywall = async () => {
     console.log('Test paywall button clicked');
@@ -73,7 +73,7 @@ export default function Login() {
 
     try {
       console.log('Login: Attempting to sign in with email and password');
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -81,37 +81,23 @@ export default function Login() {
       if (error) {
         console.error('Login: Authentication error:', error);
         setError(error.message);
+        setLoading(false); // Ensure loading is set to false on error
         return;
       }
+      
+      console.log('Login: Sign in successful.');
 
-      console.log('Login: Sign in successful, checking if user just subscribed');
-      // After successful login, check if user just subscribed and clear the flag
-      const wasJustSubscribed = await checkJustSubscribedFlag();
-      
-      if (wasJustSubscribed) {
-        console.log('Login: User has just subscribed flag set, verifying subscription status');
-        
-        // Verify subscription is properly linked
-        const subscriptionLinked = await checkSubscription();
-        
-        if (subscriptionLinked) {
-          console.log('Login: Subscription successfully linked to user account');
-          // Only clear flag after successful verification
-          await clearJustSubscribedFlag();
+      // Check subscription status AFTER successful login
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        if (isSubscribed) {
+          console.log('Login: User is subscribed post-login, marking onboarding completed');
+          await markOnboardingCompleted();
         } else {
-          console.error('Login: Failed to verify subscription after sign in');
-          // Don't clear flag - this allows for retry
-          setError('Unable to verify subscription. Please try again or contact support.');
-          return;
+          console.log('Login: User is NOT subscribed post-login');
+          // Paywall should have been shown on mount. If they are here and not subscribed,
+          // the layout should handle redirecting them back if necessary, or allow access to free features.
         }
-      } else {
-        console.log('Login: User did not have justSubscribed flag set');
-      }
-      
-      // Explicitly mark onboarding as completed for subscribers
-      if (isSubscribed) {
-        console.log('Login: User is subscribed, marking onboarding as completed');
-        await markOnboardingCompleted();
       }
       
       // Explicitly redirect to index page after successful authentication
@@ -122,6 +108,7 @@ export default function Login() {
       console.error('Login: Unexpected error during sign in:', err);
       setError('An unexpected error occurred. Please try again.');
     } finally {
+      // Ensure loading is always set to false in the finally block
       setLoading(false);
     }
   };
@@ -155,14 +142,27 @@ export default function Login() {
       if (user.identities?.length === 0) {
         console.log('Email confirmation required');
         setError('Please check your email to confirm your account before signing in');
+        // Need to set loading false here too
+        setLoading(false);
         return;
       }
 
       try {
         // Ensure we have a valid session before proceeding
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        // This might require a brief wait or re-check after signUp if session isn't immediate
+        let attempt = 0;
+        let initialSession = null;
+        while (!initialSession && attempt < 5) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          initialSession = sessionData.session;
+          if (!initialSession) {
+            attempt++;
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        
         if (!initialSession) {
-          throw new Error('No valid session after signup');
+          throw new Error('No valid session after signup and retries');
         }
 
         // Create initial user profile with retry logic
@@ -173,7 +173,7 @@ export default function Login() {
             .insert({
               id: user.id,
               email: user.email!,
-              stance: 'orthodox',
+              stance: 'orthodox', // Consider grabbing stance from onboarding if available
             });
 
           if (!profileError) {
@@ -183,6 +183,7 @@ export default function Login() {
             console.log(`Profile creation attempt ${i + 1} failed, retrying...`);
             await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
           } else {
+             console.error('Final profile creation attempt failed:', profileError);
             throw profileError;
           }
         }
@@ -206,6 +207,7 @@ export default function Login() {
 
         if (categoryError) {
           console.error('Error initializing category progress:', categoryError);
+          // Consider cleanup or retry?
           throw categoryError;
         }
 
@@ -223,6 +225,7 @@ export default function Login() {
 
         if (trackerError) {
           console.error('Error initializing daily XP tracker:', trackerError);
+          // Consider cleanup or retry?
           throw trackerError;
         }
 
@@ -255,36 +258,48 @@ export default function Login() {
 
         if (levelsError) {
           console.error('Error initializing user levels:', levelsError);
+          // Consider cleanup or retry?
           throw levelsError;
         }
 
         console.log('User levels initialized successfully');
 
-        // Verify all data was created correctly
-        const { data: verifyProfile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', user.id)
-          .single();
+        // Verification step can be simplified or removed if causing issues
+        // const { data: verifyProfile } = await supabase
+        //   .from('users')
+        //   .select('*')
+        //   .eq('id', user.id)
+        //   .single();
 
-        const { data: verifyCategories } = await supabase
-          .from('category_progress')
-          .select('*')
-          .eq('user_id', user.id);
+        // const { data: verifyCategories } = await supabase
+        //   .from('category_progress')
+        //   .select('*')
+        //   .eq('user_id', user.id);
 
-        if (!verifyProfile || !verifyCategories || verifyCategories.length !== categories.length) {
-          throw new Error('Data verification failed');
-        }
+        // if (!verifyProfile || !verifyCategories || verifyCategories.length !== categories.length) {
+        //   throw new Error('Data verification failed');
+        // }
 
-        // Now that everything is initialized, let PaywallContext handle the subscription check
-        // The navigation will be handled by the layout based on subscription status
-        console.log('Account setup complete, proceeding to subscription check');
+        // Account setup complete. Paywall was shown on mount.
+        // User can now attempt to use the app. If they didn't subscribe,
+        // the layout/feature gates should handle limitations.
+        console.log('Account setup complete. User can now use the app.');
+        // Explicitly redirect to the main app area after signup and initialization
+        router.replace('/(tabs)');
 
       } catch (initError) {
         console.error('Error during data initialization:', initError);
         // Clean up the created user if data initialization fails
-        await supabase.auth.signOut();
-        throw new Error('Failed to initialize user data. Please try again.');
+        await supabase.auth.signOut(); // Sign out the partially created user
+        const { data: adminData, error: deleteError } = await supabase.rpc('delete_user_by_id', { user_id_to_delete: user.id })
+        if (deleteError) {
+            console.error('Failed to clean up user after init error:', deleteError)
+        } else {
+            console.log('Cleaned up user after init error.')
+        }
+
+        setError('Failed to initialize user data. Please try signing up again.'); 
+        // Don't re-throw, set error and let finally handle loading state
       }
 
     } catch (error: any) {
@@ -295,7 +310,12 @@ export default function Login() {
         hint: error.hint,
         code: error.code
       });
-      setError(error.message || 'An error occurred during signup');
+      // Use a more specific error message if available (e.g., duplicate email)
+      if (error.message.includes('User already registered')) {
+        setError('Email already in use. Please sign in or use a different email.');
+      } else {
+        setError(error.message || 'An error occurred during signup');
+      }
     } finally {
       setLoading(false);
     }
@@ -307,7 +327,6 @@ export default function Login() {
       setError(null);
       console.log('Starting Apple Sign In process...');
       
-      // Get credentials from Apple Sign In - following official Supabase documentation
       console.log('Requesting Apple authentication...');
       let appleCredential;
       try {
@@ -316,54 +335,41 @@ export default function Login() {
             AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
             AppleAuthentication.AppleAuthenticationScope.EMAIL,
           ],
-          // No nonce provided here - letting Apple generate one internally
         });
         console.log('Apple credential obtained successfully');
       } catch (appleError: any) {
-        console.error('Error during Apple authentication step:', JSON.stringify({
-          code: appleError.code,
-          message: appleError.message
-        }, null, 2));
-        throw new Error(`Apple authentication failed: ${appleError.message || 'Unknown error'}`);
+        console.error('Error during Apple authentication step:', JSON.stringify({ code: appleError.code, message: appleError.message }, null, 2));
+        // Don't throw, set error and return
+        setError(`Apple sign in cancelled or failed: ${appleError.message || 'Unknown error'}`);
+        setLoading(false);
+        return; 
       }
       
       if (!appleCredential.identityToken) {
         console.error('No identity token received from Apple');
-        throw new Error('No identity token received from Apple');
+        throw new Error('No identity token received from Apple'); // Still throw critical errors
       }
       
-      // For debugging only - log a small portion of the token
-      const tokenPreview = appleCredential.identityToken.substring(0, 20) + '...' + 
-                           appleCredential.identityToken.substring(appleCredential.identityToken.length - 20);
+      const tokenPreview = appleCredential.identityToken.substring(0, 20) + '...' + appleCredential.identityToken.substring(appleCredential.identityToken.length - 20);
       console.log('Successfully received Apple credentials. Token preview:', tokenPreview);
       console.log('Attempting to sign in with Supabase using Apple token...');
       
-      // Sign in with Supabase using ONLY the token - exactly as in the documentation
       let supabaseResponse;
       try {
         supabaseResponse = await supabase.auth.signInWithIdToken({
           provider: 'apple',
           token: appleCredential.identityToken,
-          // No nonce provided - exactly following the Supabase documentation
         });
         console.log('Supabase auth response received');
       } catch (supabaseError: any) {
-        console.error('Exception during Supabase auth call:', JSON.stringify({
-          message: supabaseError.message,
-          stack: supabaseError.stack
-        }, null, 2));
+        console.error('Exception during Supabase auth call:', JSON.stringify({ message: supabaseError.message, stack: supabaseError.stack }, null, 2));
         throw new Error(`Supabase authentication call failed: ${supabaseError.message}`);
       }
       
       const { data, error: signInError } = supabaseResponse;
 
       if (signInError) {
-        console.error('Supabase auth error with Apple Sign In:', JSON.stringify({
-          code: signInError.code,
-          name: signInError.name,
-          message: signInError.message,
-          status: signInError.status
-        }, null, 2));
+        console.error('Supabase auth error with Apple Sign In:', JSON.stringify({ code: signInError.code, name: signInError.name, message: signInError.message, status: signInError.status }, null, 2));
         throw signInError;
       }
       
@@ -374,30 +380,18 @@ export default function Login() {
 
       console.log('Successfully authenticated with Apple and Supabase', data.user.id);
       
-      // Check if this was after a subscription
-      const wasJustSubscribed = await checkJustSubscribedFlag();
-      if (wasJustSubscribed) {
-        console.log('Login: User has just subscribed flag set, verifying subscription status');
-        
-        // Verify subscription is properly linked
-        const subscriptionLinked = await checkSubscription();
-        
-        if (subscriptionLinked) {
-          console.log('Login: Subscription successfully linked to user account');
-          // Only clear flag after successful verification
-          await clearJustSubscribedFlag();
-        } else {
-          console.error('Login: Failed to verify subscription after Apple sign in');
-          // Don't clear flag - this allows for retry
-          setError('Unable to verify subscription. Please try again or contact support.');
-          return;
-        }
-      }
-      
-      // After successful Apple sign-in, mark onboarding as completed for subscribers
-      if (isSubscribed) {
-        console.log('Apple Login: User is subscribed, marking onboarding as completed');
+      console.log('Login: Apple Sign in successful.');
+
+      // Check subscription status AFTER successful login
+      // Use the isSubscribed value obtained at the top level
+      // Remove invalid hook call: const { isSubscribed: currentSubscriptionStatus } = usePaywall();
+
+      if (isSubscribed) { // Use the top-level isSubscribed directly
+        console.log('Apple Login: User is subscribed post-login, marking onboarding completed');
         await markOnboardingCompleted();
+      } else {
+        console.log('Apple Login: User is NOT subscribed post-login');
+        // Paywall was shown on mount. Layout/gates handle limitations.
       }
       
       // Explicitly redirect to index page after successful authentication
@@ -415,7 +409,8 @@ export default function Login() {
       console.error('Error during Apple sign in:', JSON.stringify(errorDetails, null, 2));
       const errorMessage = error.message || 'Unknown error occurred';
       setError(`Apple Sign In failed: ${errorMessage}`);
-      Alert.alert('Sign In Error', `Failed to sign in with Apple: ${errorMessage}`);
+      // Avoid Alert here unless absolutely necessary for user feedback
+      // Alert.alert('Sign In Error', `Failed to sign in with Apple: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -481,9 +476,9 @@ export default function Login() {
           onPress={signInWithEmail}
           disabled={loading || !email || !password}
         >
-          <ThemedText style={[styles.buttonText, { color: '#000' }]}>
-            {loading ? 'Loading...' : 'Sign In'}
-          </ThemedText>
+          <ThemedText style={[styles.buttonText, { color: '#000' }]}>{
+            loading ? 'Loading...' : 'Sign In'
+          }</ThemedText>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -495,9 +490,9 @@ export default function Login() {
           onPress={signUpWithEmail}
           disabled={loading || !email || !password}
         >
-          <ThemedText style={styles.buttonText}>
-            {loading ? 'Loading...' : 'Create Account'}
-          </ThemedText>
+          <ThemedText style={styles.buttonText}>{
+            loading ? 'Loading...' : 'Create Account'
+          }</ThemedText>
         </TouchableOpacity>
 
         <ThemedText style={styles.orDivider}>or</ThemedText>

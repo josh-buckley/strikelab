@@ -1,3 +1,4 @@
+import React from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, TouchableOpacity, TextInput, ScrollView, Keyboard, Alert, TouchableWithoutFeedback, View } from 'react-native';

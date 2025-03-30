@@ -153,7 +153,7 @@ export default function HomeScreen() {
           xp: data?.clinch_xp || 0
         },
         { 
-          name: 'Defensive', 
+          name: 'Defense', 
           level: data?.defensive_level || 1,
           xp: data?.defensive_xp || 0
         },
@@ -178,7 +178,9 @@ export default function HomeScreen() {
   }
 
   const handleCreateWorkout = () => {
-    router.navigate('/create-workout/name');
+    // Navigate using absolute path, which Expo Router should now resolve
+    // correctly due to the nested Stack setup in app/(tabs)/_layout.tsx
+    router.navigate('/create-workout/name'); 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 

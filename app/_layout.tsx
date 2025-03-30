@@ -122,101 +122,82 @@ function Layout() {
     }
   }, [loaded, isPreloading]);
 
+  // Effect for handling navigation logic
   useEffect(() => {
-    if (!isMounted || authLoading || subscriptionLoading || isPreloading) return;
+    // Wait until all loading states are false and component is mounted
+    if (!isMounted || authLoading || subscriptionLoading || isPreloading || !loaded) {
+      console.log('Layout: Navigation effect waiting...', { isMounted, authLoading, subscriptionLoading, isPreloading, loaded });
+      return;
+    }
 
     const inAuthGroup = segments[0] === '(auth)';
-    const inProtectedRoute = !inAuthGroup;
-    const isOnboarding = segments[1] === 'onboarding';
-    const isPaywall = segments[1] === 'paywall';
-    const isLogin = segments[1] === 'login';
+    const inTabsGroup = segments[0] === '(tabs)';
+    // Check if the current route is *specifically* one of the core auth flow screens
+    let isAllowedAuthRoute = false;
+    if (segments.length > 1 && segments[1]) { // Explicitly check if segment exists
+        isAllowedAuthRoute = ['login', 'onboarding', 'paywall'].includes(segments[1]);
+    }
     const hasSession = !!session;
 
-    // Use a more specific navigation check that prioritizes justSubscribed flag
-    const checkNavigation = async () => {
-      // Check if user has just subscribed
-      const justSubscribedFlag = await checkJustSubscribedFlag();
-      
-      // Also check AsyncStorage directly for subscription status
-      // This is a fallback in case the context state gets reset
-      const storedSubscriptionStatus = await AsyncStorage.getItem('strikelab_is_subscribed');
-      const isStoredAsSubscribed = storedSubscriptionStatus === 'true';
-      
-      // Use either the context state or the stored state
-      const effectiveSubscriptionStatus = isSubscribed || isStoredAsSubscribed;
-      
-      setJustSubscribed(justSubscribedFlag);
-      
-      // Add debug logs
-      console.log('Navigation check:', {
-        hasSession,
-        isSubscribed,
-        isStoredAsSubscribed,
-        effectiveSubscriptionStatus,
-        justSubscribed: justSubscribedFlag,
-        isOnboarding,
-        isPaywall,
-        isLogin,
-        inAuthGroup,
-        inProtectedRoute,
-        segments,
-      });
+    console.log('Layout: Running navigation check', { hasSession, isSubscribed, inAuthGroup, inTabsGroup, isAllowedAuthRoute, segments });
 
-      // If we're already in the tabs section and either subscribed or have a session, don't redirect
-      if (segments[0] === '(tabs)' && (effectiveSubscriptionStatus || hasSession)) {
-        console.log('User is in tabs and has subscription or session, allowing access');
-        return;
-      }
-
-      // SANDBOX TESTING OVERRIDE
-      // For sandbox testing only - if we're on the paywall screen, don't redirect
-      if (isPaywall) {
-        console.log('User is on paywall screen, allowing completion');
-        return;
-      }
-      
-      // If user just subscribed, always allow them to access login
-      if (justSubscribedFlag) {
-        console.log('User just subscribed, directing to login if needed');
-        if (!isLogin) {
-          console.log('User just subscribed but not on login, redirecting to login');
-          router.replace(ROUTES.AUTH.LOGIN);
-        }
-        return;
-      }
-
-      // For existing paths that shouldn't redirect
-      if (isOnboarding || isPaywall || isLogin) {
-        console.log('User is already on onboarding, paywall, or login, not redirecting');
-        return;
-      }
-
-      // Main navigation logic
-      if (!hasSession && !effectiveSubscriptionStatus) {
-        // Check if user has completed onboarding before
-        const hasCompletedOnboarding = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
-        
-        if (hasCompletedOnboarding === 'true') {
-          console.log('User has completed onboarding before, redirecting to login');
-          router.replace(ROUTES.AUTH.LOGIN);
+    if (hasSession) {
+      // User is logged in
+      console.log('Layout: User HAS session.');
+      if (isSubscribed) {
+        // Logged in and subscribed
+        console.log('Layout: User IS subscribed.');
+        // If they are not already in the main app section, redirect them there.
+        if (!inTabsGroup) {
+          console.log('Layout: Redirecting subscribed user to (tabs)');
+          router.replace('/(tabs)'); // Use replace to avoid back button issues
         } else {
-          console.log('New user, redirecting to onboarding');
-          router.replace(ROUTES.AUTH.ONBOARDING);
+          console.log('Layout: User already in (tabs), no redirect needed.');
         }
-      } else if (hasSession && !effectiveSubscriptionStatus && !inAuthGroup) {
-        console.log('Has session but not subscribed, redirecting to paywall');
-        router.replace({
-          pathname: ROUTES.AUTH.PAYWALL,
-          params: { fromOnboarding: 'true' }
-        });
-      } else if (!hasSession && effectiveSubscriptionStatus) {
-        console.log('Subscribed but no session, redirecting to login');
-        router.replace(ROUTES.AUTH.LOGIN);
+      } else {
+        // Logged in but NOT subscribed
+        console.log('Layout: User IS NOT subscribed.');
+        // If they are trying to access a protected route (not in auth group and not an allowed auth route like paywall), redirect to paywall
+        if (!inAuthGroup && !isAllowedAuthRoute) {
+           console.log('Layout: Redirecting non-subscribed user from protected route to paywall');
+           router.replace({
+             pathname: ROUTES.AUTH.PAYWALL,
+             params: { fromOnboarding: 'false' } // Adjust params as needed
+           });
+        } else {
+           console.log('Layout: Non-subscribed user is in auth group or allowed route (e.g., paywall), allowing access.');
+           // Allow access to login, onboarding, paywall itself
+        }
       }
-    };
-    
-    checkNavigation();
-  }, [session, isSubscribed, authLoading, subscriptionLoading, segments, isMounted, isPreloading, justSubscribed]);
+    } else {
+      // User is NOT logged in
+      console.log('Layout: User does NOT have session.');
+      // If they are trying to access anything outside the auth group
+      if (!inAuthGroup) {
+        console.log('Layout: Non-logged-in user outside auth group. Checking onboarding status.');
+        // Redirect non-logged-in users away from protected areas
+        AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY).then(hasCompletedOnboarding => {
+          if (hasCompletedOnboarding === 'true') {
+            console.log('Layout: Redirecting to Login (onboarding previously completed).');
+            router.replace(ROUTES.AUTH.LOGIN);
+          } else {
+            console.log('Layout: Redirecting to Onboarding (first time or not completed).');
+            router.replace(ROUTES.AUTH.ONBOARDING);
+          }
+        }).catch(err => {
+           console.error('Layout: Error reading onboarding status, defaulting to login:', err);
+           router.replace(ROUTES.AUTH.LOGIN); // Fallback on error
+        });
+      } else {
+         console.log('Layout: Non-logged-in user in auth group, allowing access.');
+         // Allow access to screens within the (auth) group (like login, onboarding)
+      }
+    }
+
+  // Dependencies: Re-run when session, subscription status, loading states, segments, or mount status change.
+  // Ensure router is stable or memoized if provided via context, otherwise it might cause loops.
+  // Assuming Expo Router's useRouter provides a stable instance.
+  }, [session, isSubscribed, authLoading, subscriptionLoading, segments, isMounted, isPreloading, loaded, router]);
 
   if (!loaded || isPreloading) {
     return <View style={{ flex: 1, backgroundColor: colorScheme === 'dark' ? '#000' : '#fff' }} />;
@@ -244,12 +225,13 @@ function Layout() {
                   headerShown: false,
                 }} 
               />
-              <Stack.Screen 
+              {/* create-workout is now handled within (tabs)/_layout.tsx */}
+              {/* <Stack.Screen 
                 name="create-workout" 
                 options={{ 
                   headerShown: false,
-                }} 
-              />
+                }}
+              /> */}
               <Stack.Screen name="+not-found" />
             </Stack>
             <StatusBar style="auto" />

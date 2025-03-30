@@ -4,21 +4,20 @@ import { useRouter, useSegments } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import { ROUTES } from '@/lib/routes';
 import { usePaywall } from '@/contexts/PaywallContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Define the onboarding completed key to match the one in AuthProvider
-const ONBOARDING_COMPLETED_KEY = 'strikelab_onboarding_completed';
+// Removed AsyncStorage import - onboarding state comes from useAuth
 
 export default function AuthLayout() {
-  const { session, loading } = useAuth();
+  // Only need session and loading from useAuth for redirection logic here
+  const { session, loading } = useAuth(); 
   const { isSubscribed, checkJustSubscribedFlag } = usePaywall();
   const segments = useSegments();
   const router = useRouter();
-  const [justSubscribed, setJustSubscribed] = useState(false);
+  const [justSubscribed, setJustSubscribed] = useState(false); // Keep for potential post-paywall logic if needed
 
   // Consolidated auth flow check
   const checkAuthFlow = useCallback(async () => {
-    // Check subscription flag status
+    // Check subscription flag status - useful if paywall is presented outside login later
     const justSubscribedFlag = await checkJustSubscribedFlag();
     setJustSubscribed(justSubscribedFlag);
     
@@ -28,61 +27,76 @@ export default function AuthLayout() {
       justSubscribed: justSubscribedFlag,
       loading,
       segments,
-      currentSegment: segments[1],
+      currentSegment: segments.length > 1 ? segments[1] : segments[0],
     });
     
-    // If loading, don't navigate yet
+    // If loading session state, wait
     if (loading) {
-      console.log('AuthLayout: Still loading, waiting before navigation');
+      console.log('AuthLayout: Still loading session, waiting...');
       return;
     }
 
-    // Handle paywall screen specially - don't redirect away while paywall is active
-    if (segments[1] === 'paywall') {
-      console.log('AuthLayout: On paywall screen, allowing interaction');
-      return;
-    }
-    
-    // If user is authenticated AND subscribed, send them to main app
-    if (session && isSubscribed) {
-      console.log('AuthLayout: User is authenticated and subscribed, redirecting to main app');
-      router.replace(ROUTES.TABS.HOME);
+    const currentScreen = segments.length > 1 ? segments[1] as string : segments[0] as string;
+    const currentGroup = segments.length > 0 ? segments[0] as string : '';
+
+    // --- Allow Access Rules --- 
+
+    // Allow access to paywall screen always
+    if (currentScreen === 'paywall') {
+      console.log('AuthLayout: On paywall screen, allowing.');
       return;
     }
 
-    // If user just subscribed, ensure they're on login screen
-    if (justSubscribedFlag && segments[1] !== 'login') {
-      console.log('AuthLayout: User just subscribed, ensuring they are on login screen');
-      router.replace(ROUTES.AUTH.LOGIN);
+    // Allow access to login screen always (redirection happens *from* here)
+    if (currentScreen === 'login') {
+      console.log('AuthLayout: On login screen, allowing.');
       return;
     }
-    
-    // Allow users to complete onboarding without being logged in
-    if (segments[1] === 'onboarding') {
-      console.log('AuthLayout: User is on onboarding, allowing completion');
+
+    // Allow access to onboarding screen if there's no session
+    if (currentScreen === 'onboarding' && !session) {
+      console.log('AuthLayout: On onboarding screen without session, allowing.');
       return;
     }
-    
-    // Allow users to access login without being authenticated
-    if (segments[1] === 'login') {
-      console.log('AuthLayout: User is on login, allowing access');
-      return;
-    }
-    
-    // For all other screens in auth group, redirect unauthenticated users to onboarding
-    if (!session && !justSubscribedFlag) {
-      // Check if user has completed onboarding before
-      const hasCompletedOnboarding = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
-      
-      if (hasCompletedOnboarding === 'true') {
-        console.log('AuthLayout: User has completed onboarding before, redirecting to login');
-        router.replace(ROUTES.AUTH.LOGIN);
-      } else {
-        console.log('AuthLayout: New user, redirecting to onboarding');
+
+    // --- Redirection Rules --- 
+
+    // 1. If NO session, redirect to onboarding (if not already on allowed screens)
+    if (!session) {
+      console.log('AuthLayout: No session.');
+      if (currentScreen !== 'onboarding' && currentScreen !== 'login' && currentScreen !== 'paywall') {
+        console.log('AuthLayout: Redirecting unauthenticated user to onboarding.');
         router.replace(ROUTES.AUTH.ONBOARDING);
+        return;
       }
     }
-  }, [session, loading, isSubscribed, segments, checkJustSubscribedFlag, router]);
+    // 2. If has session...
+    else {
+      console.log('AuthLayout: Session exists.');
+      // If user is subscribed, redirect to main app (if in auth group)
+      if (isSubscribed) {
+        console.log('AuthLayout: User is subscribed.');
+        if (currentGroup === '(auth)') {
+          console.log('AuthLayout: Redirecting subscribed user from auth group to main app.');
+          router.replace(ROUTES.TABS.HOME);
+          return;
+        }
+      } 
+      // If user has session but is NOT subscribed
+      // They should have completed onboarding (marked in OnboardingScreen9)
+      // They should have seen paywall on login screen mount
+      // --> Keep them on login/paywall until they subscribe.
+      else {
+         console.log('AuthLayout: User has session but is NOT subscribed.');
+         if (currentScreen !== 'login' && currentScreen !== 'paywall') {
+            console.log('AuthLayout: Redirecting authenticated, unsubscribed user to login (for paywall).');
+            router.replace(ROUTES.AUTH.LOGIN);
+            return;
+         }
+      }
+    }
+
+  }, [session, loading, isSubscribed, segments, checkJustSubscribedFlag, router]); // Dependencies updated
 
   // Single effect to handle all auth flow checks
   useEffect(() => {
