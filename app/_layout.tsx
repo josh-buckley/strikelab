@@ -147,12 +147,12 @@ function Layout() {
       if (isSubscribed) {
         // Logged in and subscribed
         console.log('Layout: User IS subscribed.');
-        // If they are not already in the main app section, redirect them there.
-        if (!inTabsGroup) {
-          console.log('Layout: Redirecting subscribed user to (tabs)');
+        // If they are not already in the main app section, AND not navigating to create-workout, redirect them there.
+        if (!inTabsGroup && segments[0] !== 'create-workout') { 
+          console.log('Layout: Redirecting subscribed user to (tabs) (excluding create-workout)');
           router.replace('/(tabs)'); // Use replace to avoid back button issues
         } else {
-          console.log('Layout: User already in (tabs), no redirect needed.');
+          console.log('Layout: User already in (tabs) or heading to create-workout, no redirect needed.');
         }
       } else {
         // Logged in but NOT subscribed
@@ -225,13 +225,13 @@ function Layout() {
                   headerShown: false,
                 }} 
               />
-              {/* create-workout is now handled within (tabs)/_layout.tsx */}
-              {/* <Stack.Screen 
+              <Stack.Screen 
                 name="create-workout" 
                 options={{ 
                   headerShown: false,
+                  animation: 'slide_from_right'
                 }}
-              /> */}
+              />
               <Stack.Screen name="+not-found" />
             </Stack>
             <StatusBar style="auto" />
