@@ -66,6 +66,8 @@
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
+    <key>RCTNewArchEnabled</key>
+    <true/>
     <key>SKPaymentQueue</key>
     <true/>
     <key>UIBackgroundModes</key>

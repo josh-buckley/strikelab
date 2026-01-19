@@ -1,0 +1,9 @@
+# Speed up EAS uploads
+.git
+node_modules
+ios/Pods
+ios/build
+android/.gradle
+android/build
+*.log
+.expo
