@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { Session, User, AuthError } from '@supabase/supabase-js';
 import { View } from 'react-native';
 import { supabase } from './supabase';
@@ -17,6 +17,7 @@ type AuthContextType = {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   markOnboardingCompleted: () => Promise<void>;
+  checkOnboardingCompleted: () => Promise<boolean>;
   isFirstLaunch: boolean;
 };
 
@@ -32,6 +33,7 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
   refreshProfile: async () => {},
   markOnboardingCompleted: async () => {},
+  checkOnboardingCompleted: async () => false,
   isFirstLaunch: true,
 });
 
@@ -235,59 +237,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Track if we've done the initial onboarding check
+  const hasCheckedOnboarding = useRef(false);
+
+  // Check onboarding status once on mount
   useEffect(() => {
+    if (hasCheckedOnboarding.current) return;
+    hasCheckedOnboarding.current = true;
+
     const checkOnboardingStatus = async () => {
       try {
-        // Get the subscription status from AsyncStorage to avoid circular dependency
-        // with PaywallContext
-        const isUserSubscribed = await AsyncStorage.getItem('strikelab_is_subscribed');
-        
-        const isFirst = await checkFirstLaunch();
-        console.log('AuthProvider: First launch check:', isFirst, 'Subscribed:', isUserSubscribed === 'true');
-        setIsFirstLaunch(isFirst);
-        
-        // Only force sign out for first launch if the user is NOT subscribed
-        // This prevents subscribed users from being forced back to onboarding
-        if (isFirst && state.session && isUserSubscribed !== 'true') {
-          console.log('AuthProvider: First launch with existing session, not subscribed - signing out to force onboarding');
-          await signOut();
-        } else if (isFirst && state.session && isUserSubscribed === 'true') {
-          console.log('AuthProvider: First launch with subscription - marking onboarding as completed');
-          await markOnboardingCompleted();
-        }
+        const isFirst = await checkOnboardingCompleted();
+        console.log('AuthProvider: Initial onboarding check - isFirstLaunch:', !isFirst);
+        setIsFirstLaunch(!isFirst);
       } catch (error) {
         console.error('Error in checkOnboardingStatus:', error);
+        setIsFirstLaunch(true); // Default to true on error
       }
     };
-    
-    checkOnboardingStatus();
-  }, [state.session]);
 
-  // Add this function inside the AuthProvider component
-  async function checkFirstLaunch() {
+    checkOnboardingStatus();
+  }, []);
+
+  // Check if onboarding has been completed
+  const checkOnboardingCompleted = useCallback(async (): Promise<boolean> => {
     try {
       const hasCompletedOnboarding = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
-      return hasCompletedOnboarding !== 'true';
+      return hasCompletedOnboarding === 'true';
     } catch (error) {
-      console.error('Error checking first launch status:', error);
-      return true; // Default to true if there's an error
+      console.error('Error checking onboarding status:', error);
+      return false;
     }
-  }
+  }, []);
 
-  // Add this function inside the AuthProvider component
-  async function markOnboardingCompleted() {
+  // Mark onboarding as completed
+  const markOnboardingCompleted = useCallback(async () => {
     try {
       await AsyncStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
+      setIsFirstLaunch(false);
+      console.log('AuthProvider: Onboarding marked as completed');
     } catch (error) {
       console.error('Error marking onboarding as completed:', error);
     }
-  }
+  }, []);
 
   const contextValue = {
     ...state,
     signOut,
     refreshProfile,
     markOnboardingCompleted,
+    checkOnboardingCompleted,
     isFirstLaunch,
   };
 

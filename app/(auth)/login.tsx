@@ -7,13 +7,10 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { ROUTES } from '@/lib/routes';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import * as Haptics from 'expo-haptics';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import Superwall from '@superwall/react-native-superwall';
-import * as Crypto from 'expo-crypto';
 import { usePaywall } from '@/contexts/PaywallContext';
 import { useAuth } from '@/lib/AuthProvider';
+import { ensureUserProfile } from '@/lib/userProfile';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -45,27 +42,6 @@ export default function Login() {
     
     // Empty dependency array ensures this runs only once on mount
   }, []); // Removed presentPaywall from dependencies as it's stable from context
-
-  const handleTestPaywall = async () => {
-    console.log('Test paywall button clicked');
-    try {
-      console.log('Superwall.shared available:', !!Superwall.shared);
-      
-      // Simple implementation directly from React Native docs
-      await Superwall.shared.register('test_paywall').then(() => {
-        // This will only run if:
-        // 1. No paywall is configured for this placement
-        // 2. The user is already paying
-        // 3. The paywall is Non-Gated and was dismissed
-        // 4. The paywall is Gated and the user purchased
-        console.log('Feature callback executed - user has access');
-      });
-
-    } catch (error) {
-      console.error('Error in handleTestPaywall:', error);
-      setError('Failed to present paywall: ' + (error instanceof Error ? error.message : String(error)));
-    }
-  };
 
   const signInWithEmail = async () => {
     setLoading(true);
@@ -116,10 +92,10 @@ export default function Login() {
   async function signUpWithEmail() {
     setLoading(true);
     setError(null);
-    
+
     try {
       console.log('Starting signup process...');
-      
+
       // First sign up the user
       const { error: signUpError, data: { user } } = await supabase.auth.signUp({
         email,
@@ -130,7 +106,7 @@ export default function Login() {
         console.error('Signup auth error:', signUpError);
         throw signUpError;
       }
-      
+
       if (!user) {
         console.error('No user data returned from signup');
         throw new Error('No user data returned');
@@ -142,14 +118,12 @@ export default function Login() {
       if (user.identities?.length === 0) {
         console.log('Email confirmation required');
         setError('Please check your email to confirm your account before signing in');
-        // Need to set loading false here too
         setLoading(false);
         return;
       }
 
       try {
         // Ensure we have a valid session before proceeding
-        // This might require a brief wait or re-check after signUp if session isn't immediate
         let attempt = 0;
         let initialSession = null;
         while (!initialSession && attempt < 5) {
@@ -160,146 +134,34 @@ export default function Login() {
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
-        
+
         if (!initialSession) {
           throw new Error('No valid session after signup and retries');
         }
 
-        // Create initial user profile with retry logic
-        let profileCreated = false;
-        for (let i = 0; i < 3 && !profileCreated; i++) {
-          const { error: profileError } = await supabase
-            .from('users')
-            .insert({
-              id: user.id,
-              email: user.email!,
-              stance: 'orthodox', // Consider grabbing stance from onboarding if available
-            });
+        // Use shared profile creation function
+        console.log('Login: Ensuring user profile exists...');
+        const profileResult = await ensureUserProfile(user);
 
-          if (!profileError) {
-            profileCreated = true;
-            console.log('User profile created successfully');
-          } else if (i < 2) {
-            console.log(`Profile creation attempt ${i + 1} failed, retrying...`);
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-          } else {
-             console.error('Final profile creation attempt failed:', profileError);
-            throw profileError;
-          }
+        if (!profileResult.success) {
+          throw new Error(profileResult.error || 'Failed to create user profile');
         }
 
-        // Initialize category progress
-        const categories = [
-          'punches', 'kicks', 'elbows', 'knees', 'footwork', 
-          'clinch', 'defensive', 'sweeps', 'feints'
-        ];
-        
-        const categoryEntries = categories.map(category => ({
-          user_id: user.id,
-          name: category,
-          xp: 0,
-          level: 1
-        }));
-
-        const { error: categoryError } = await supabase
-          .from('category_progress')
-          .insert(categoryEntries);
-
-        if (categoryError) {
-          console.error('Error initializing category progress:', categoryError);
-          // Consider cleanup or retry?
-          throw categoryError;
-        }
-
-        console.log('Category progress initialized successfully');
-
-        // Initialize daily XP tracker
-        const today = new Date().toISOString().split('T')[0];
-        const { error: trackerError } = await supabase
-          .from('daily_xp_tracker')
-          .insert({
-            user_id: user.id,
-            date: today,
-            workout_count: 0
-          });
-
-        if (trackerError) {
-          console.error('Error initializing daily XP tracker:', trackerError);
-          // Consider cleanup or retry?
-          throw trackerError;
-        }
-
-        console.log('Daily XP tracker initialized successfully');
-
-        // Initialize user levels
-        const { error: levelsError } = await supabase
-          .from('user_levels')
-          .insert({
-            user_id: user.id,
-            punches_level: 1,
-            punches_xp: 0,
-            kicks_level: 1,
-            kicks_xp: 0,
-            elbows_level: 1,
-            elbows_xp: 0,
-            knees_level: 1,
-            knees_xp: 0,
-            footwork_level: 1,
-            footwork_xp: 0,
-            clinch_level: 1,
-            clinch_xp: 0,
-            defensive_level: 1,
-            defensive_xp: 0,
-            sweeps_level: 1,
-            sweeps_xp: 0,
-            feints_level: 1,
-            feints_xp: 0
-          });
-
-        if (levelsError) {
-          console.error('Error initializing user levels:', levelsError);
-          // Consider cleanup or retry?
-          throw levelsError;
-        }
-
-        console.log('User levels initialized successfully');
-
-        // Verification step can be simplified or removed if causing issues
-        // const { data: verifyProfile } = await supabase
-        //   .from('users')
-        //   .select('*')
-        //   .eq('id', user.id)
-        //   .single();
-
-        // const { data: verifyCategories } = await supabase
-        //   .from('category_progress')
-        //   .select('*')
-        //   .eq('user_id', user.id);
-
-        // if (!verifyProfile || !verifyCategories || verifyCategories.length !== categories.length) {
-        //   throw new Error('Data verification failed');
-        // }
-
-        // Account setup complete. Paywall was shown on mount.
-        // User can now attempt to use the app. If they didn't subscribe,
-        // the layout/feature gates should handle limitations.
         console.log('Account setup complete. User can now use the app.');
-        // Explicitly redirect to the main app area after signup and initialization
         router.replace('/(tabs)');
 
       } catch (initError) {
         console.error('Error during data initialization:', initError);
         // Clean up the created user if data initialization fails
-        await supabase.auth.signOut(); // Sign out the partially created user
-        const { data: adminData, error: deleteError } = await supabase.rpc('delete_user_by_id', { user_id_to_delete: user.id })
+        await supabase.auth.signOut();
+        const { error: deleteError } = await supabase.rpc('delete_user_by_id', { user_id_to_delete: user.id });
         if (deleteError) {
-            console.error('Failed to clean up user after init error:', deleteError)
+          console.error('Failed to clean up user after init error:', deleteError);
         } else {
-            console.log('Cleaned up user after init error.')
+          console.log('Cleaned up user after init error.');
         }
 
-        setError('Failed to initialize user data. Please try signing up again.'); 
-        // Don't re-throw, set error and let finally handle loading state
+        setError('Failed to initialize user data. Please try signing up again.');
       }
 
     } catch (error: any) {
@@ -310,7 +172,6 @@ export default function Login() {
         hint: error.hint,
         code: error.code
       });
-      // Use a more specific error message if available (e.g., duplicate email)
       if (error.message.includes('User already registered')) {
         setError('Email already in use. Please sign in or use a different email.');
       } else {

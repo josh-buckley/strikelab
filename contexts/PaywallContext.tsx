@@ -11,14 +11,18 @@ import {
   resetUser,
   getSubscriptionDetails,
   restorePurchases,
+  syncPurchases,
   PRODUCT_IDS,
   setupCustomerInfoListener
 } from '@/lib/revenueCat';
+import { ensureUserProfile } from '@/lib/userProfile';
 
 // Key for the "just subscribed" flag
 const JUST_SUBSCRIBED_KEY = 'strikelab_just_subscribed';
 // Key for tracking subscription status in AsyncStorage
 const IS_SUBSCRIBED_KEY = 'strikelab_is_subscribed';
+// Key for tracking if paywall has been shown this session
+const HAS_SHOWN_PAYWALL_KEY = 'strikelab_has_shown_paywall_session';
 
 interface PaywallContextType {
   isSubscribed: boolean;
@@ -31,6 +35,8 @@ interface PaywallContextType {
   setJustSubscribedFlag: () => Promise<void>;
   clearJustSubscribedFlag: () => Promise<void>;
   checkJustSubscribedFlag: () => Promise<boolean>;
+  hasShownPaywall: boolean;
+  resetPaywallShownFlag: () => void;
 }
 
 const PaywallContext = createContext<PaywallContextType | undefined>(undefined);
@@ -40,12 +46,19 @@ const SUBSCRIPTION_VERIFY_INTERVAL = 1000 * 60 * 60; // 1 hour
 
 export function PaywallProvider({ children }: { children: React.ReactNode }) {
   console.log('PaywallProvider initializing');
-  
+
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isTrialActive, setIsTrialActive] = useState(false);
   const [subscriptionType, setSubscriptionType] = useState<'monthly' | 'annual' | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasShownPaywall, setHasShownPaywall] = useState(false);
   const { session } = useAuth();
+
+  // Reset paywall shown flag (e.g., when user signs out)
+  const resetPaywallShownFlag = useCallback(() => {
+    console.log('PaywallContext: Resetting hasShownPaywall flag');
+    setHasShownPaywall(false);
+  }, []);
 
   // Initialize Superwall and RevenueCat
   useEffect(() => {
@@ -116,96 +129,62 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Separate profile creation logic
+  // Profile creation using shared utility
   const createUserProfile = async (user: User) => {
-    console.log('Attempting to create user profile:', user.id);
-    
+    console.log('PaywallContext: Ensuring user profile exists for:', user.id);
+    const result = await ensureUserProfile(user);
+    if (!result.success) {
+      console.error('PaywallContext: Failed to ensure user profile:', result.error);
+      // Don't throw - user is still subscribed, just log error
+    }
+  };
+
+  // Helper to persist subscription state to AsyncStorage
+  const persistSubscriptionState = async (
+    subscribed: boolean,
+    type: 'monthly' | 'annual' | null,
+    trial: boolean
+  ) => {
     try {
-      const { data: existingProfile } = await supabase
-        .from('users')
-        .select()
-        .eq('id', user.id)
-        .single();
-
-      if (!existingProfile) {
-        console.log('No existing profile found, creating new profile');
-        
-        // Create initial user profile
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: user.id,
-            email: user.email,
-            stance: 'orthodox',
-          });
-
-        if (profileError) throw profileError;
-
-        // Initialize user levels
-        const { error: levelsError } = await supabase
-          .from('user_levels')
-          .insert({
-            user_id: user.id,
-            punches_level: 1,
-            punches_xp: 0,
-            kicks_level: 1,
-            kicks_xp: 0,
-            elbows_level: 1,
-            elbows_xp: 0,
-            knees_level: 1,
-            knees_xp: 0,
-            footwork_level: 1,
-            footwork_xp: 0,
-            clinch_level: 1,
-            clinch_xp: 0,
-            defensive_level: 1,
-            defensive_xp: 0,
-            sweeps_level: 1,
-            sweeps_xp: 0,
-            feints_level: 1,
-            feints_xp: 0
-          });
-
-        if (levelsError) throw levelsError;
-
-        // Initialize category progress
-        const categories = [
-          'punches', 'kicks', 'elbows', 'knees', 'footwork', 
-          'clinch', 'defensive', 'sweeps', 'feints'
-        ];
-        
-        const categoryEntries = categories.map(category => ({
-          user_id: user.id,
-          name: category,
-          xp: 0,
-          level: 1
-        }));
-
-        const { error: categoryError } = await supabase
-          .from('category_progress')
-          .insert(categoryEntries);
-
-        if (categoryError) throw categoryError;
-
-        // Initialize daily XP tracker
-        const today = new Date().toISOString().split('T')[0];
-        const { error: trackerError } = await supabase
-          .from('daily_xp_tracker')
-          .insert({
-            user_id: user.id,
-            date: today,
-            workout_count: 0
-          });
-
-        if (trackerError) throw trackerError;
-
-        console.log('User profile and related data initialized successfully');
+      if (subscribed) {
+        await Promise.all([
+          AsyncStorage.setItem(IS_SUBSCRIBED_KEY, 'true'),
+          AsyncStorage.setItem('strikelab_subscription_type', type || 'monthly'),
+          AsyncStorage.setItem('strikelab_is_trial', trial ? 'true' : 'false'),
+        ]);
+        console.log('PaywallContext: Subscription state persisted to AsyncStorage');
       } else {
-        console.log('Existing profile found for user:', user.id);
+        await Promise.all([
+          AsyncStorage.setItem(IS_SUBSCRIBED_KEY, 'false'),
+          AsyncStorage.removeItem('strikelab_subscription_type'),
+          AsyncStorage.removeItem('strikelab_is_trial'),
+        ]);
+        console.log('PaywallContext: Subscription state cleared from AsyncStorage');
       }
     } catch (error) {
-      console.error('Error creating user profile:', error);
-      // Don't throw - user is still subscribed, just log error
+      console.error('PaywallContext: Error persisting subscription state:', error);
+    }
+  };
+
+  // Helper to update subscription state and persist
+  const updateSubscriptionState = async (
+    subscribed: boolean,
+    type: 'monthly' | 'annual' | null,
+    trial: boolean
+  ) => {
+    setIsSubscribed(subscribed);
+    setSubscriptionType(type);
+    setIsTrialActive(trial);
+    await persistSubscriptionState(subscribed, type, trial);
+
+    // Update Superwall status
+    if (Superwall.shared) {
+      if (subscribed) {
+        const entitlements = new Set(['Premium Access']);
+        Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
+      } else {
+        Superwall.shared.subscriptionStatus = 'inactive';
+      }
     }
   };
 
@@ -303,21 +282,12 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
           
           if (details.isSubscribed) {
             console.log('Anonymous subscription detected, updating state');
-            setIsSubscribed(true);
-            setIsTrialActive(details.isTrialActive);
-            setSubscriptionType(details.subscriptionType);
-            
-            // Store subscription details for transfer
+            await updateSubscriptionState(true, details.subscriptionType, details.isTrialActive);
+
+            // Store subscription details for transfer when user logs in
             await AsyncStorage.setItem('strikelab_anon_subscription_type', details.subscriptionType || 'monthly');
             await AsyncStorage.setItem('strikelab_anon_is_trial', details.isTrialActive ? 'true' : 'false');
-            
-            // Set subscription status in Superwall
-            if (Superwall.shared) {
-              console.log('Updating Superwall status for anonymous user');
-              const entitlements = new Set(['Premium Access']);
-              Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
-            }
-            
+
             return true;
           }
           
@@ -361,27 +331,19 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
           
           if (details.isSubscribed) {
             console.log('Subscription successfully transferred to authenticated user');
-            
+
             // Clear anonymous subscription data
             await Promise.all([
               AsyncStorage.removeItem('strikelab_anon_subscription_type'),
               AsyncStorage.removeItem('strikelab_anon_is_trial')
             ]);
-            
+
             // Update state with transferred subscription
-            setIsSubscribed(true);
-            setIsTrialActive(details.isTrialActive);
-            setSubscriptionType(details.subscriptionType);
-            
-            // Update Superwall status
-            if (Superwall.shared) {
-              const entitlements = new Set(['Premium Access']);
-              Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
-            }
-            
+            await updateSubscriptionState(true, details.subscriptionType, details.isTrialActive);
+
             // Create user profile
             await createUserProfile(session.user);
-            
+
             return true;
           }
           
@@ -400,41 +362,22 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
 
       if (details.isSubscribed) {
         console.log('Active subscription found for authenticated user');
-        setIsSubscribed(true);
-        setIsTrialActive(details.isTrialActive);
-        setSubscriptionType(details.subscriptionType);
-        
-        // Update Superwall status
-        if (Superwall.shared) {
-          const entitlements = new Set(['Premium Access']);
-          Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
-        }
-        
+        await updateSubscriptionState(true, details.subscriptionType, details.isTrialActive);
+
         // Create or update user profile
         await createUserProfile(session.user);
-        
+
         return true;
       }
-      
+
       console.log('No active subscription found for authenticated user');
-      setIsSubscribed(false);
-      setIsTrialActive(false);
-      setSubscriptionType(null);
-      
-      if (Superwall.shared) {
-        Superwall.shared.subscriptionStatus = 'inactive';
-      }
-      
+      await updateSubscriptionState(false, null, false);
+
       return false;
 
     } catch (error) {
       console.error('Error in subscription flow:', error);
-      setIsSubscribed(false);
-      setIsTrialActive(false);
-      setSubscriptionType(null);
-      if (Superwall.shared) {
-        Superwall.shared.subscriptionStatus = 'inactive';
-      }
+      await updateSubscriptionState(false, null, false);
       return false;
     } finally {
       setLoading(false);
@@ -448,75 +391,121 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
       loading,
       isSubscribed
     });
-    
+
     if (session?.user) {
       checkSubscription();
     } else {
       console.log('No session, clearing subscription state');
-      
+
+      // Reset paywall shown flag so it can be shown again after sign out
+      setHasShownPaywall(false);
+
       // Only reset RevenueCat user if we're not already in anonymous state
-      try {
-        // We'll use AsyncStorage to track if we've previously identified a non-anonymous user
-        AsyncStorage.getItem('strikelab_rc_identified').then(identified => {
+      const handleSignOut = async () => {
+        try {
+          const identified = await AsyncStorage.getItem('strikelab_rc_identified');
           if (identified === 'true') {
             console.log('Previously identified non-anonymous user, resetting RevenueCat user');
-            resetUser().then(() => {
-              AsyncStorage.removeItem('strikelab_rc_identified');
-            }).catch(error => {
+            try {
+              await resetUser();
+              await AsyncStorage.removeItem('strikelab_rc_identified');
+            } catch (error: any) {
               console.log('Safe to ignore RevenueCat reset error for anonymous user:', error.message);
-            });
+            }
           } else {
             console.log('No previously identified user, skipping RevenueCat reset');
           }
-        });
-      } catch (error) {
-        console.error('Error handling RevenueCat user state:', error);
-      }
-      
-      setIsSubscribed(false);
-      setIsTrialActive(false);
-      setSubscriptionType(null);
-      if (Superwall.shared) {
-        Superwall.shared.subscriptionStatus = 'inactive';
-      }
+        } catch (error) {
+          console.error('Error handling RevenueCat user state:', error);
+        }
+
+        // Clear subscription state and persist
+        setIsSubscribed(false);
+        setIsTrialActive(false);
+        setSubscriptionType(null);
+        await persistSubscriptionState(false, null, false);
+
+        if (Superwall.shared) {
+          Superwall.shared.subscriptionStatus = 'inactive';
+        }
+      };
+
+      handleSignOut();
     }
   }, [session]);
 
   const presentPaywall = async (identifier: string) => {
     console.log('PaywallContext: Attempting to present paywall with identifier:', identifier);
+
+    // Check if already subscribed - no need to show paywall
+    if (isSubscribed) {
+      console.log('PaywallContext: User already subscribed, skipping paywall');
+      return;
+    }
+
+    // Check if we've already shown the paywall this session
+    if (hasShownPaywall) {
+      console.log('PaywallContext: Paywall already shown this session, skipping');
+      return;
+    }
+
     try {
       if (!Superwall.shared) {
         throw new Error('Superwall.shared is not available');
       }
 
+      // Mark that we've shown the paywall
+      setHasShownPaywall(true);
+      console.log('PaywallContext: Marking paywall as shown');
+
       // Create a promise to handle the Superwall callback
       await Superwall.shared.register(identifier).then(async () => {
         console.log('PaywallContext: Paywall callback executed - purchase completed or paywall dismissed');
-        
+
         try {
+          // IMPORTANT: Sync purchases with RevenueCat first
+          // When Superwall handles a purchase via StoreKit, RevenueCat may not know about it yet
+          // This is critical for App Store review where sandbox purchases need to be synced
+          console.log('PaywallContext: Syncing purchases with RevenueCat...');
+          try {
+            await syncPurchases();
+            console.log('PaywallContext: Purchase sync completed');
+          } catch (syncError) {
+            console.warn('PaywallContext: Purchase sync failed, continuing with verification:', syncError);
+          }
+
+          // Small delay to allow RevenueCat backend to process the synced purchase
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
           // Try multiple times to verify the subscription
           let attempts = 0;
           const maxAttempts = 3;
           let subscriptionVerified = false;
-          
+
           while (attempts < maxAttempts && !subscriptionVerified) {
             try {
               console.log(`PaywallContext: Checking subscription status (attempt ${attempts + 1}/${maxAttempts})`);
-              
+
               // Add increasing delays between attempts
               if (attempts > 0) {
                 await new Promise(resolve => setTimeout(resolve, 1500 * (attempts + 1)));
+
+                // Sync again on retry in case it helps
+                try {
+                  await syncPurchases();
+                } catch (e) {
+                  // Ignore sync errors on retry
+                }
               }
-              
-              // Ensure session is valid before checking subscription
+
+              // Session validation is optional - anonymous users can still have valid purchases
               try {
                 await ensureSessionValid();
               } catch (sessionError) {
-                console.error(`PaywallContext: Session validation failed (attempt ${attempts + 1}):`, sessionError);
-                attempts++;
-                continue;
+                console.log(`PaywallContext: No valid session (attempt ${attempts + 1}), continuing anyway for anonymous purchase`);
+                // Don't skip - anonymous purchases are valid
               }
-              
+
               const subscriptionDetails = await getSubscriptionDetails();
               console.log('PaywallContext: Subscription details:', subscriptionDetails);
               
@@ -559,46 +548,66 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
           }
           
           if (!subscriptionVerified) {
-            console.log('PaywallContext: Failed to verify subscription after all attempts');
-            
-            // Special handling for sandbox testing
-            if (__DEV__ || process.env.EXPO_PUBLIC_ENVIRONMENT === 'sandbox') {
-              console.log('PaywallContext: In testing environment - ensuring subscription is set');
-              
-              // Get the subscription type from Superwall's callback if possible
-              // This requires checking the product identifier or receipt
+            console.log('PaywallContext: Failed to verify subscription after initial attempts');
+
+            // RevenueCat may take longer to process sandbox receipts (used during App Store review)
+            // Try additional attempts with longer delays before giving up
+            console.log('PaywallContext: Attempting extended verification for potential sandbox purchase');
+
+            let extendedAttempts = 0;
+            const maxExtendedAttempts = 3;
+
+            while (extendedAttempts < maxExtendedAttempts && !subscriptionVerified) {
+              // Longer delays: 3s, 5s, 8s
+              const delay = (extendedAttempts + 1) * 2000 + 1000;
+              console.log(`PaywallContext: Extended verification attempt ${extendedAttempts + 1}/${maxExtendedAttempts}, waiting ${delay}ms`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+
+              try {
+                const extendedDetails = await getSubscriptionDetails();
+                if (extendedDetails.isSubscribed) {
+                  console.log('PaywallContext: Subscription verified on extended attempt');
+                  await setJustSubscribedFlag();
+                  await updateSubscriptionState(true, extendedDetails.subscriptionType, extendedDetails.isTrialActive);
+                  subscriptionVerified = true;
+                  break;
+                }
+              } catch (extendedError) {
+                console.error(`PaywallContext: Extended verification attempt ${extendedAttempts + 1} failed:`, extendedError);
+              }
+
+              extendedAttempts++;
+            }
+
+            // If still not verified, try to get receipt directly from Superwall as last resort
+            if (!subscriptionVerified) {
+              console.log('PaywallContext: All verification attempts failed, trying receipt-based fallback');
+
               try {
                 const receipt = await Superwall.shared.getAppStoreReceipt();
-                console.log('PaywallContext: Checking receipt for subscription type:', receipt);
-                
-                // Check if it's an annual subscription with trial
-                const isAnnualWithTrial = receipt.includes('annual') || receipt.includes('yearly');
-                
-                await setJustSubscribedFlag();
-                setIsSubscribed(true);
-                setIsTrialActive(isAnnualWithTrial); // Only set trial active for annual plan
-                setSubscriptionType(isAnnualWithTrial ? 'annual' : 'monthly');
-                
-                console.log('PaywallContext: Set subscription type to:', isAnnualWithTrial ? 'annual (with trial)' : 'monthly');
-                
-                await AsyncStorage.setItem(IS_SUBSCRIBED_KEY, 'true');
-                if (Superwall.shared) {
-                  const entitlements = new Set(['Premium Access']);
-                  Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
+                if (receipt) {
+                  console.log('PaywallContext: Found App Store receipt, granting access');
+
+                  // Check if it's an annual subscription
+                  const isAnnual = receipt.toLowerCase().includes('annual') || receipt.toLowerCase().includes('yearly');
+
+                  await setJustSubscribedFlag();
+                  await updateSubscriptionState(true, isAnnual ? 'annual' : 'monthly', isAnnual);
+
+                  console.log('PaywallContext: Set subscription type to:', isAnnual ? 'annual' : 'monthly');
+                  subscriptionVerified = true;
                 }
               } catch (receiptError) {
-                // Fallback if we can't determine the subscription type
-                console.log('PaywallContext: Could not determine subscription type, defaulting to monthly');
-                await setJustSubscribedFlag();
-                setIsSubscribed(true);
-                setIsTrialActive(false);
-                setSubscriptionType('monthly');
-                await AsyncStorage.setItem(IS_SUBSCRIBED_KEY, 'true');
-                if (Superwall.shared) {
-                  const entitlements = new Set(['Premium Access']);
-                  Superwall.shared.subscriptionStatus = { type: 'active', entitlements };
-                }
+                console.error('PaywallContext: Receipt-based fallback failed:', receiptError);
+                // At this point, we've exhausted all options
+                // The purchase may have failed or there's a genuine issue
               }
+            }
+
+            if (!subscriptionVerified) {
+              console.error('PaywallContext: Unable to verify subscription after all attempts');
+              // Don't show an error to the user - let them try again or contact support
+              // The Superwall paywall should have already handled the purchase result
             }
           }
         } catch (checkError) {
@@ -647,6 +656,8 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     setJustSubscribedFlag,
     clearJustSubscribedFlag,
     checkJustSubscribedFlag,
+    hasShownPaywall,
+    resetPaywallShownFlag,
   };
 
   console.log('PaywallContext: Current state:', {

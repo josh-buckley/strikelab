@@ -184,18 +184,21 @@ export function setupCustomerInfoListener(
   };
 }
 
-// Log purchase from Superwall/StoreKit
-export async function logPurchase(receipt: string): Promise<void> {
+// Sync purchases from StoreKit to RevenueCat
+// This is essential when Superwall handles purchases - RevenueCat needs to be notified
+export async function syncPurchases(): Promise<void> {
   await ensureInitialized();
   try {
-    if (Platform.OS === 'ios') {
-      await Purchases.syncPurchases();
-    } else {
-      // For Android, we need to implement this
-      // await Purchases.syncPurchasesAndroid(receipt);
-    }
+    console.log('RevenueCat: Syncing purchases...');
+    await Purchases.syncPurchases();
+    console.log('RevenueCat: Purchases synced successfully');
   } catch (error) {
     console.error('Error syncing purchases with RevenueCat:', error);
     throw error;
   }
+}
+
+// Log purchase from Superwall/StoreKit (legacy, use syncPurchases instead)
+export async function logPurchase(receipt: string): Promise<void> {
+  await syncPurchases();
 } 
