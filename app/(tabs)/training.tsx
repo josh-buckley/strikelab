@@ -1114,7 +1114,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins',
     textAlignVertical: 'center',
     paddingVertical: 0,
-    height: '100%',
+    lineHeight: 20,
   },
   categoryList: {
     maxHeight: 36,

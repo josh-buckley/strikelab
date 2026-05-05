@@ -11,12 +11,14 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
-      "buildNumber": "1",
+      "buildNumber": "72",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition for voice-controlled workout logging.",
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone for voice-controlled workout logging.",
         "SKPaymentQueue": true,
-        "UIBackgroundModes": ["remote-notification"],
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
@@ -26,11 +28,13 @@
         ]
       },
       "bundleIdentifier": "com.joshbuckley.strikelab",
-      "associatedDomains": ["applinks:api.superwall.me"],
+      "associatedDomains": [
+        "applinks:api.superwall.me"
+      ],
       "splash": {
-        "image": "./assets/images/splash.gif",
+        "image": "./assets/images/splash-logo.png",
         "resizeMode": "cover",
-        "backgroundColor": "#1c1c1e"
+        "backgroundColor": "#151718"
       }
     },
     "android": {
@@ -53,11 +57,11 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash.gif",
+          "image": "./assets/images/splash-logo.png",
           "resizeMode": "cover",
-          "backgroundColor": "#1c1c1e",
+          "backgroundColor": "#151718",
           "imageResizeMode": "cover",
-          "splashScreenBackground": "#1c1c1e"
+          "splashScreenBackground": "#151718"
         }
       ],
       "expo-speech-recognition",
@@ -79,8 +83,8 @@
     "owner": "josh-buckley",
     "splash": {
       "image": "./assets/images/splash-logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#1c1c1e"
+      "resizeMode": "cover",
+      "backgroundColor": "#151718"
     }
   }
 }

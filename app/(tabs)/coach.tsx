@@ -1,712 +1,315 @@
-import { View, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, Image, ActivityIndicator, StyleSheet, Animated, Easing } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import {
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  View,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
+  Easing,
+  Alert,
+} from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Markdown from 'react-native-markdown-display';
+import { ThemedView } from '@/components/ThemedView';
 import { ThemedText } from '@/components/ThemedText';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useState, useRef, useEffect } from 'react';
-import * as ImagePicker from 'expo-image-picker';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase } from '@/lib/supabase';
-import { techniques } from '@/data/strikes';
-import type { Technique } from '@/data/strikes';
-import React from 'react';
-import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/lib/AuthProvider';
-import Constants from 'expo-constants';
-
-// First try to get API key from environment variables, then from EAS secrets
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || Constants.expoConfig?.extra?.GEMINI_API_KEY;
-
-if (!GEMINI_API_KEY) {
-  console.warn('Missing GEMINI_API_KEY in environment variables or EAS secrets');
-  // Instead of throwing an error, we'll disable the feature
-}
-
-const DAILY_MESSAGE_LIMIT = 25;
-
-// Only initialize genAI if we have an API key
-const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-const getOrdinalSuffix = (day: number): string => {
-  if (day > 3 && day < 21) return 'th';
-  switch (day % 10) {
-    case 1: return 'st';
-    case 2: return 'nd';
-    case 3: return 'rd';
-    default: return 'th';
-  }
-};
+import { sendMessage } from '@/lib/openai';
+import { fetchCoachContext, formatCoachContext } from '@/lib/coachContext';
+import {
+  fetchConversations,
+  fetchMessages,
+  createConversation,
+  saveMessage,
+  updateConversationTitle,
+  deleteConversation,
+  CoachConversation,
+  CoachMessage,
+} from '@/lib/coachService';
 
 export default function CoachScreen() {
-  const theme = useColorScheme() ?? 'light';
-  const colors = Colors[theme];
   const { session } = useAuth();
-  const { initialMessage } = useLocalSearchParams<{ initialMessage: string }>();
-  const [message, setMessage] = useState('');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [dailyMessageCount, setDailyMessageCount] = useState(0);
-  const [isLoadingCount, setIsLoadingCount] = useState(true);
-  const scrollViewRef = useRef<ScrollView>(null);
-  const rotateAnimation = useRef(new Animated.Value(0)).current;
-  const [loadingText, setLoadingText] = useState('Reviewing fight knowledge...');
+  const [conversations, setConversations] = useState<CoachConversation[]>([]);
+  const [selectedConv, setSelectedConv] = useState<CoachConversation | null>(null);
+  const [messages, setMessages] = useState<CoachMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
+  const scrollRef = useRef<ScrollView>(null);
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
-  // Fetch daily message count on mount and when session changes
   useEffect(() => {
-    if (session?.user) {
-      fetchDailyMessageCount();
-    }
+    Animated.loop(
+      Animated.timing(rotateAnim, { toValue: 1, duration: 1500, useNativeDriver: true, easing: Easing.linear })
+    ).start();
+  }, []);
+
+  useEffect(() => {
+    if (session?.user) loadConversations();
   }, [session?.user]);
 
-  const fetchDailyMessageCount = async () => {
+  const loadConversations = async () => {
+    setListLoading(true);
+    const convs = await fetchConversations(session!.user.id);
+    setConversations(convs);
+    setListLoading(false);
+  };
+
+  const openConversation = async (conv: CoachConversation) => {
+    setSelectedConv(conv);
+    const msgs = await fetchMessages(conv.id);
+    setMessages(msgs);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 100);
+  };
+
+  const handleNewChat = async () => {
     if (!session?.user) return;
+    const conv = await createConversation(session.user.id, 'New Chat');
+    if (conv) {
+      setSelectedConv(conv);
+      setMessages([]);
+      loadConversations();
+    }
+  };
 
+  const handleDelete = (convId: string) => {
+    Alert.alert('Delete Chat', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          await deleteConversation(convId);
+          if (selectedConv?.id === convId) { setSelectedConv(null); setMessages([]); }
+          loadConversations();
+        },
+      },
+    ]);
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || !selectedConv || !session?.user) return;
+    const userMsg = input.trim();
+    setInput('');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Save user message
+    await saveMessage(selectedConv.id, 'user', userMsg);
+    const updatedUser = [...messages, { id: 'tmp-u', conversation_id: selectedConv.id, role: 'user' as const, content: userMsg, created_at: new Date().toISOString() }];
+    setMessages(updatedUser);
+
+    // Auto-title from first message
+    if (messages.length === 0) {
+      const title = userMsg.length > 40 ? userMsg.substring(0, 40) + '...' : userMsg;
+      await updateConversationTitle(selectedConv.id, title);
+    }
+
+    // Get AI response
+    setLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      // First, ensure there's a record for today
-      const { data: existingRecord, error: existingError } = await supabase
-        .from('daily_coach_messages')
-        .select('message_count')
-        .eq('user_id', session.user.id)
-        .eq('date', today)
-        .single();
+      // Fetch user's training data for context
+      const ctx = await fetchCoachContext(session!.user.id);
+      const contextStr = formatCoachContext(ctx);
 
-      if (existingError && existingError.code !== 'PGRST116') { // PGRST116 is "not found"
-        throw existingError;
-      }
+      const response = await sendMessage([
+        ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        { role: 'user' as const, content: userMsg },
+      ], contextStr);
 
-      if (!existingRecord) {
-        // Create a new record for today
-        const { error: insertError } = await supabase
-          .from('daily_coach_messages')
-          .insert({
-            user_id: session.user.id,
-            date: today,
-            message_count: 0
-          });
-
-        if (insertError) throw insertError;
-        setDailyMessageCount(0);
-      } else {
-        setDailyMessageCount(existingRecord.message_count);
-      }
-    } catch (error) {
-      console.error('Error fetching daily message count:', error);
-      Alert.alert('Error', 'Failed to fetch message count');
+      await saveMessage(selectedConv.id, 'assistant', response);
+      setMessages(prev => [...prev, {
+        id: 'tmp-a', conversation_id: selectedConv.id, role: 'assistant' as const,
+        content: response, created_at: new Date().toISOString(),
+      }]);
+      loadConversations();
+    } catch {
+      Alert.alert('Error', 'Failed to get a response. Please try again.');
     } finally {
-      setIsLoadingCount(false);
+      setLoading(false);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 
-  const incrementMessageCount = async () => {
-    if (!session?.user) return;
-    
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      const { error } = await supabase
-        .from('daily_coach_messages')
-        .upsert(
-          {
-            user_id: session.user.id,
-            date: today,
-            message_count: dailyMessageCount + 1
-          },
-          {
-            onConflict: 'user_id,date',
-            ignoreDuplicates: false
-          }
-        );
-
-      if (error) throw error;
-      setDailyMessageCount(prev => prev + 1);
-    } catch (error) {
-      console.error('Error incrementing message count:', error);
-      Alert.alert('Error', 'Failed to update message count');
-    }
+  const formatDate = (d: string) => {
+    const date = new Date(d);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    if (diff < 86400000) return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if (diff < 604800000) return date.toLocaleDateString('en-US', { weekday: 'short' });
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  useEffect(() => {
-    const animate = () => {
-      Animated.loop(
-        Animated.timing(rotateAnimation, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: true,
-          easing: Easing.linear
-        })
-      ).start();
-    };
-
-    if (isLoading) {
-      animate();
-      const texts = [
-        'Reviewing fight knowledge...',
-        'Analysing fight science...',
-        'Breaking down fight mechanics...'
-      ];
-      let index = 0;
-      const interval = setInterval(() => {
-        index = (index + 1) % texts.length;
-        setLoadingText(texts[index]);
-      }, 5000);
-
-      return () => clearInterval(interval);
-    } else {
-      rotateAnimation.setValue(0);
-    }
-  }, [isLoading]);
-
-  useEffect(() => {
-    if (initialMessage) {
-      handleSend(initialMessage);
-    }
-  }, [initialMessage]);
-
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Please allow access to your photo library to upload images.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setSelectedImage(result.assets[0].uri);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to select image. Please try again.');
-      console.error('Image picker error:', error);
-    }
-  };
-
-  const handleSend = async (messageToSend?: string) => {
-    const messageContent = messageToSend || message;
-    if (!messageContent.trim() && !selectedImage) return;
-    
-    if (!session?.user) {
-      Alert.alert('Error', 'Please sign in to use the coach');
-      return;
-    }
-
-    if (dailyMessageCount >= DAILY_MESSAGE_LIMIT) {
-      Alert.alert(
-        'Daily Limit Reached',
-        'You have reached your daily limit of 25 messages. Please try again tomorrow.'
-      );
-      return;
-    }
-
-    const userMessage = messageContent.trim();
-    setMessage('');
-    setSelectedImage(null);
-    
-    // Only show the user's message in the UI
-    const newMessages = [
-      ...messages,
-      { role: 'user' as const, content: userMessage }
-    ];
-    setMessages(newMessages);
-    
-    setIsLoading(true);
-    try {
-      // Extract technique names from the message
-      const techniqueNames = techniques
-        .map((t: Technique) => t.name.toLowerCase())
-        .filter((name: string) => userMessage.toLowerCase().includes(name.toLowerCase()));
-
-      let context = '';
-      
-      // Only fetch workout data if the query is about training history or specific techniques used
-      const isHistoryQuery = userMessage.toLowerCase().includes('did') || 
-        userMessage.toLowerCase().includes('done') ||
-        userMessage.toLowerCase().includes('recent') ||
-        userMessage.toLowerCase().includes('last') ||
-        userMessage.toLowerCase().includes('previous') ||
-        userMessage.toLowerCase().includes('history') ||
-        userMessage.toLowerCase().includes('log') ||
-        userMessage.toLowerCase().includes('trained') ||
-        userMessage.toLowerCase().includes('workout') ||
-        userMessage.toLowerCase().includes('session');
-
-      if (isHistoryQuery) {
-        // Fetch recent workouts (last 7 days by default)
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-        const { data: recentWorkouts, error: workoutsError } = await supabase
-          .from('workouts')
-          .select(`
-            id,
-            name,
-            created_at,
-            total_xp,
-            workout_combos (
-              training_type,
-              training_mode,
-              techniques,
-              sets,
-              reps,
-              rounds,
-              round_minutes,
-              round_seconds,
-              duration_minutes,
-              duration_seconds
-            )
-          `)
-          .gte('created_at', oneWeekAgo.toISOString())
-          .order('created_at', { ascending: false });
-
-        if (workoutsError) throw workoutsError;
-
-        if (recentWorkouts.length > 0) {
-          // First stage - Workout formatting
-          context += `Recent Workouts\n\n`;
-          recentWorkouts.forEach(workout => {
-            const date = new Date(workout.created_at);
-            const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
-            const month = date.toLocaleDateString('en-US', { month: 'long' });
-            const day = date.getDate();
-            const formattedDate = `${dayOfWeek}, ${month} ${day}${getOrdinalSuffix(day)}`;
-
-            // Group techniques by category
-            const techniquesByCategory = new Map<string, Set<string>>();
-            let totalRounds = 0;
-            let totalDuration = 0;
-
-            workout.workout_combos?.forEach(combo => {
-              if (!combo.techniques) return;
-              
-              // Track rounds and duration
-              if (combo.rounds) totalRounds += combo.rounds;
-              if (combo.duration_minutes) totalDuration += (combo.duration_minutes * 60);
-              if (combo.duration_seconds) totalDuration += combo.duration_seconds;
-              if (combo.round_minutes) totalDuration += (combo.rounds * combo.round_minutes * 60);
-              if (combo.round_seconds) totalDuration += (combo.rounds * combo.round_seconds);
-
-              combo.techniques.forEach((technique: string) => {
-                const foundTechnique = techniques.find(t => t.name === technique);
-                if (foundTechnique) {
-                  if (!techniquesByCategory.has(foundTechnique.category)) {
-                    techniquesByCategory.set(foundTechnique.category, new Set());
-                  }
-                  techniquesByCategory.get(foundTechnique.category)?.add(technique);
-                }
-              });
-            });
-
-            context += `${formattedDate}\n`;
-            context += `Total XP: ${workout.total_xp}\n`;
-            if (totalRounds > 0) context += `Rounds: ${totalRounds}\n`;
-            if (totalDuration > 0) {
-              const minutes = Math.floor(totalDuration / 60);
-              const seconds = totalDuration % 60;
-              context += `Duration: ${minutes}m ${seconds}s\n`;
-            }
-
-            techniquesByCategory.forEach((techniques, category) => {
-              const techniqueList = Array.from(techniques);
-              context += `${category}: ${techniqueList.join(', ')}\n`;
-            });
-
-            // Add training types and modes
-            const trainingTypes = new Set(workout.workout_combos?.map(combo => combo.training_type).filter(Boolean));
-            const trainingModes = new Set(workout.workout_combos?.map(combo => combo.training_mode).filter(Boolean));
-            
-            if (trainingTypes.size > 0) {
-              context += `Training Types: ${Array.from(trainingTypes).join(', ')}\n`;
-            }
-            if (trainingModes.size > 0) {
-              context += `Training Modes: ${Array.from(trainingModes).join(', ')}\n`;
-            }
-            
-            context += '\n';
-          });
-
-          // Fetch relevant workout notes
-          const { data: relevantNotes, error: notesError } = await supabase
-            .from('workout_notes')
-            .select(`
-              notes,
-              strikes_mentioned,
-              workouts!inner (
-                created_at
-              )
-            `)
-            .or(
-              techniqueNames.length ? 
-                `strikes_mentioned.cs.{${techniqueNames.join(',')}}` : 
-                'created_at.gte.' + oneWeekAgo.toISOString()
-            )
-            .order('workouts(created_at)', { ascending: false });
-
-          if (notesError) throw notesError;
-
-          // Second stage - Notes formatting
-          if (relevantNotes?.length) {
-            context += `Recent Training Notes\n\n`;
-            relevantNotes.forEach(note => {
-              const workout = (note as any).workouts as { created_at: string };
-              const date = new Date(workout.created_at);
-              const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
-              const month = date.toLocaleDateString('en-US', { month: 'long' });
-              const day = date.getDate();
-              const formattedDate = `${dayOfWeek}, ${month} ${day}${getOrdinalSuffix(day)}`;
-              
-              context += `${formattedDate}\n\n`;
-              context += `${note.notes}\n\n`;
-              if (note.strikes_mentioned && note.strikes_mentioned.length > 0) {
-                context += `Techniques mentioned: ${note.strikes_mentioned.join(', ')}\n\n`;
-              }
-            });
-          }
-        }
-      }
-
-      // Create messages array for AI with context
-      const messagesWithContext = [
-        ...messages,
-        ...(context ? [{ role: 'user' as const, content: context }] : []),
-        { role: 'user' as const, content: userMessage }
-      ];
-
-      // Convert messages to a single string for Gemini
-      const prompt = messagesWithContext.map(msg => {
-        return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`;
-      }).join('\n\n');
-
-      const formattedPrompt = `You are an expert kickboxing and muay thai coach. Respond to the user's questions and provide technical advice. Focus on specific, actionable feedback. Make sure your responses are easily readable. Don't ever ouput a single asterisk to represent a dot point. Use technical terms when appropriate. Keep the responses relatively brief and be encouraging.\n\n${prompt}`;
-
-      // Check if genAI is available
-      if (!genAI) {
-        setIsLoading(false);
-        setMessages(prev => [
-          ...prev, 
-          { role: 'assistant', content: "Coach AI is only available in production builds. Please try again later." }
-        ]);
-        return;
-      }
-
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent([
-        formattedPrompt
-      ]);
-      const response = await result.response;
-      
-      // Log the response text
-      console.log('AI Response:', response.text());
-      
-      // Update UI with just the user message and AI response
-      setMessages([
-        ...newMessages,
-        { role: 'assistant' as const, content: response.text() }
-      ]);
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-      
-      // Increment message count after successful response
-      await incrementMessageCount();
-    } catch (error) {
-      console.error('Error:', error);
-      Alert.alert('Error', 'Failed to get response from AI coach. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const MessageBubble = ({ message }: { message: ChatMessage }) => {
-
-
-    const renderContent = (content: string) => {
-      // Replace multiple spaces with a single space first
-      content = content.replace(/\s{2,}/g, ' ');
-      
-      // Then handle single asterisks that are bullet points (not part of bold text)
-      content = content.replace(/^[*]\s/gm, '• ');
-      content = content.replace(/\n[*]\s/g, '\n• ');
-      
-      // Add single line break before numbered headers and ensure it's preserved
-      content = content.replace(/([^.\n])\s*(\d+\.\s*\*\*)/g, '$1\n$2');
-      
-      // Split on bold text, including any numbers before it
-      const parts = content.split(/(\d+\.\s*\*\*.*?\*\*|\*\*.*?\*\*)/g);
-      return parts.map((part, index) => {
-        if (part.includes('**')) {
-          // Extract the text between asterisks, preserving any numbers before it
-          const text = part.replace(/(\d+\.\s*)?(\*\*)(.*?)(\*\*)/, '$1$3');
-          return (
-            <ThemedText key={index} style={{ 
-              fontFamily: 'PoppinsSemiBold',
-              fontSize: 16, 
-              lineHeight: 24,
-              color: '#FFD700',
-              marginTop: text.match(/^\d+\./) ? 4 : 0  // Reduced margin even further for numbered headers
-            }}>
-              {text}
-            </ThemedText>
-          );
-        }
-        return (
-          <ThemedText key={index} style={{ 
-            fontSize: 16, 
-            lineHeight: 24, 
-            fontFamily: 'Poppins',
-            color: message.role === 'user' ? '#FFFFFF' : colors.text
-          }}>
-            {part}
-          </ThemedText>
-        );
-      });
-    };
-
+  // ---- CONVERSATION LIST VIEW ----
+  if (!selectedConv) {
     return (
-      <View style={{
-        backgroundColor: message.role === 'user' ? '#262626' : '#1a1a1a',
-        padding: 16,
-        borderRadius: 16,
-        marginVertical: 8,
-        maxWidth: '85%',
-        alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start',
-      }}>
-        {renderContent(message.content)}
-      </View>
-    );
-  };
+      <ThemedView style={styles.container}>
+        <ThemedView style={styles.header}>
+          <ThemedText style={styles.headerTitle}>coach</ThemedText>
+          <TouchableOpacity style={styles.newButton} onPress={handleNewChat}>
+            <IconSymbol name="plus" size={22} color="#FFD700" />
+          </TouchableOpacity>
+        </ThemedView>
 
-  const ExamplePrompt = ({ text }: { text: string }) => (
-    <TouchableOpacity 
-      style={{ 
-        backgroundColor: '#262626',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 16,
-        marginRight: 8
-      }}
-      onPress={() => {
-        setMessage(text);
-      }}
-    >
-      <ThemedText style={{ fontSize: 14 }}>{text}</ThemedText>
-    </TouchableOpacity>
-  );
-
-  return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1, backgroundColor: colors.background }}
-    >
-      <View style={{ flex: 1 }}>
-        <ScrollView 
-          ref={scrollViewRef}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ 
-            padding: 16,
-            paddingTop: '15%'
-          }}
-          keyboardShouldPersistTaps="never"
-          keyboardDismissMode="on-drag"
-        >
-          {messages.length === 0 ? (
-            <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-              <ThemedText style={{ 
-                fontSize: 32, 
-                fontWeight: 'bold',
-                textDecorationLine: 'line-through',
-                textDecorationStyle: 'solid',
-                textDecorationColor: '#FFD700',
-                lineHeight: 36,
-                includeFontPadding: true
-              }}>
-                strikelab
-              </ThemedText>
-              <View style={{ opacity: 0.2 }}>
-                <ThemedText style={{ 
-                  fontSize: 32, 
-                  fontWeight: 'bold',
-                  lineHeight: 32,
-                  includeFontPadding: true,
-                  marginTop: -8
-                }}>
-                  coach
-                </ThemedText>
-              </View>
-              {(DAILY_MESSAGE_LIMIT - dailyMessageCount) <= 10 && (
-                <ThemedText style={{ 
-                  marginTop: 8, 
-                  opacity: 0.6 
-                }}>
-                  {DAILY_MESSAGE_LIMIT - dailyMessageCount} messages remaining today
-                </ThemedText>
-              )}
-            </View>
+        <ScrollView style={styles.list} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+          {listLoading ? (
+            <ThemedText style={styles.emptyText}>Loading...</ThemedText>
+          ) : conversations.length === 0 ? (
+            <ThemedView style={styles.emptyState}>
+              <ThemedText style={styles.emptyTitle}>No conversations yet</ThemedText>
+              <ThemedText style={styles.emptySub}>Tap + to start chatting with your coach</ThemedText>
+            </ThemedView>
           ) : (
-            <>
-              {(DAILY_MESSAGE_LIMIT - dailyMessageCount) <= 10 && (
-                <View style={{ 
-                  flexDirection: 'row', 
-                  justifyContent: 'center',
-                  marginBottom: 16
-                }}>
-                  <ThemedText style={{ opacity: 0.6 }}>
-                    {DAILY_MESSAGE_LIMIT - dailyMessageCount} messages remaining today
-                  </ThemedText>
-                </View>
-              )}
-              {messages.map((msg, index) => (
-                <MessageBubble key={index} message={msg} />
-              ))}
-            </>
+            conversations.map(conv => (
+              <TouchableOpacity key={conv.id} style={styles.convCard} onPress={() => openConversation(conv)} onLongPress={() => handleDelete(conv.id)}>
+                <ThemedView style={styles.convInfo}>
+                  <ThemedText style={styles.convTitle} numberOfLines={1}>{conv.title}</ThemedText>
+                  <ThemedText style={styles.convPreview} numberOfLines={1}>{conv.last_message}</ThemedText>
+                </ThemedView>
+                <ThemedText style={styles.convDate}>{formatDate(conv.updated_at)}</ThemedText>
+              </TouchableOpacity>
+            ))
           )}
-          {isLoading && (
-            <View style={{ 
-              padding: 16, 
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12
-            }}>
-              <Animated.View style={[
-                {
-                  width: 31,
-                  height: 31,
-                  borderRadius: 15.5,
-                  borderWidth: 2,
-                  borderColor: 'rgba(255, 255, 255, 0.15)',
-                  borderTopColor: '#FFD700',
-                },
-                {
-                  transform: [{
-                    rotate: rotateAnimation.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0deg', '360deg']
-                    })
-                  }]
-                }
-              ]} />
-              <ThemedText style={{ 
-                fontSize: 16,
-                opacity: 0.7
-              }}>
-                {loadingText}
-              </ThemedText>
-            </View>
+        </ScrollView>
+      </ThemedView>
+    );
+  }
+
+  // ---- CHAT VIEW ----
+  return (
+    <ThemedView style={styles.container}>
+      {/* Chat header */}
+      <ThemedView style={styles.chatHeader}>
+        <TouchableOpacity onPress={() => { setSelectedConv(null); loadConversations(); }}>
+          <IconSymbol name="chevron.left" size={24} color="#FFD700" />
+        </TouchableOpacity>
+        <ThemedText style={styles.chatTitle} numberOfLines={1}>{selectedConv.title}</ThemedText>
+        <TouchableOpacity onPress={() => handleDelete(selectedConv.id)}>
+          <IconSymbol name="trash" size={20} color="#666" />
+        </TouchableOpacity>
+      </ThemedView>
+
+      {/* Messages */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+        <ScrollView ref={scrollRef} style={styles.messagesContainer} contentContainerStyle={styles.messagesContent} onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
+          {messages.map((msg, i) => (
+            <ThemedView key={msg.id || i} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
+              {msg.role === 'user' ? (
+                <ThemedText style={[styles.messageText, styles.userText]}>
+                  {msg.content}
+                </ThemedText>
+              ) : (
+                <Markdown
+                  style={{
+                    body: { fontFamily: 'Poppins', fontSize: 15, lineHeight: 21, color: '#ddd' },
+                    strong: { fontFamily: 'PoppinsSemiBold', color: '#FFD700' },
+                    blockquote: { backgroundColor: 'transparent', borderLeftColor: '#FFD700', borderLeftWidth: 2, paddingLeft: 8, marginVertical: 4 },
+                    blockquoteText: { color: '#999', fontStyle: 'italic' },
+                    paragraph: { marginVertical: 2 },
+                  }}
+                >
+                  {msg.content}
+                </Markdown>
+              )}
+            </ThemedView>
+          ))}
+          {loading && (
+            <ThemedView style={styles.loadingBubble}>
+              <Animated.View style={[styles.loadingDot, { transform: [{ rotate: rotateAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }]} />
+            </ThemedView>
           )}
         </ScrollView>
 
-        <View style={{ 
-          paddingHorizontal: 16, 
-          paddingTop: 8,
-          paddingBottom: Platform.OS === 'ios' ? 16 : 8 
-        }}>
-          {messages.length === 0 && (
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={{ marginBottom: 8 }}
-              contentContainerStyle={{ paddingHorizontal: 8 }}
-            >
-              <ExamplePrompt text="What combos did I do this week?" />
-              <ExamplePrompt text="List my recent coach feedback." />
-              <ExamplePrompt text="How to improve my jab?" />
-            </ScrollView>
-          )}
-
-          <View 
-            style={{ 
-              flexDirection: 'row',
-              backgroundColor: '#262626',
-              borderRadius: 24,
-              padding: 8,
-              alignItems: 'center'
-            }}
-          >
-            <View style={{ flex: 1, marginHorizontal: 8 }}>
-              {selectedImage ? (
-                <View style={{ 
-                  backgroundColor: '#333',
-                  borderRadius: 8,
-                  marginBottom: 8,
-                  width: 80,
-                  height: 80
-                }}>
-                  <Image
-                    source={{ uri: selectedImage }}
-                    style={{ 
-                      width: 80,
-                      height: 80,
-                      borderRadius: 8
-                    }}
-                    resizeMode="cover"
-                  />
-                  <TouchableOpacity 
-                    style={{ 
-                      position: 'absolute',
-                      top: -6,
-                      right: -6,
-                      backgroundColor: colors.background,
-                      borderRadius: 12,
-                      width: 20,
-                      height: 20,
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    onPress={() => setSelectedImage(null)}
-                  >
-                    <IconSymbol name="xmark" size={12} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-              <View style={{ minHeight: 40, justifyContent: 'center' }}>
-                <TextInput
-                  style={{ 
-                    color: colors.text,
-                    fontSize: 16,
-                    maxHeight: 100,
-                    paddingVertical: 8
-                  }}
-                  placeholder="Message"
-                  placeholderTextColor="#666"
-                  value={message}
-                  onChangeText={setMessage}
-                  multiline
-                  onSubmitEditing={() => handleSend()}
-                />
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={{ 
-                backgroundColor: message.trim() || selectedImage ? '#FFD700' : '#333',
-                padding: 8,
-                borderRadius: 14,
-                marginLeft: 4
-              }}
-              onPress={() => handleSend()}
-              disabled={!message.trim() && !selectedImage}
-            >
-              <IconSymbol 
-                name="arrow.up" 
-                size={16} 
-                color={message.trim() || selectedImage ? '#000000' : '#666'} 
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+        {/* Input bar */}
+        <ThemedView style={styles.inputBar}>
+          <TextInput
+            style={styles.textInput}
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask your coach anything..."
+            placeholderTextColor="#555"
+            multiline
+            maxLength={1000}
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
+            blurOnSubmit
+          />
+          <TouchableOpacity style={[styles.sendButton, !input.trim() && styles.sendDisabled]} onPress={handleSend} disabled={!input.trim()}>
+            <IconSymbol name="arrow.up" size={18} color={input.trim() ? '#151718' : '#666'} />
+          </TouchableOpacity>
+        </ThemedView>
+      </KeyboardAvoidingView>
+    </ThemedView>
   );
-} 
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 80 },
+
+  // List view
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    paddingHorizontal: 24, marginBottom: 24,
+  },
+  headerTitle: {
+    fontSize: 32, fontFamily: 'PoppinsSemiBold', lineHeight: 40,
+    textDecorationLine: 'line-through', textDecorationColor: '#FFD700', color: '#fff',
+  },
+  newButton: {
+    width: 44, height: 44, borderRadius: 22,
+    borderWidth: 1, borderColor: '#FFD700',
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: -2,
+  },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 24, paddingBottom: 24 },
+  convCard: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1c1c1e',
+  },
+  convInfo: { flex: 1, marginRight: 12 },
+  convTitle: { fontFamily: 'Poppins', fontSize: 16, color: '#fff' },
+  convPreview: { fontFamily: 'Poppins', fontSize: 13, color: '#666', marginTop: 2 },
+  convDate: { fontFamily: 'Poppins', fontSize: 12, color: '#555' },
+  emptyState: { alignItems: 'center', marginTop: 80 },
+  emptyTitle: { fontFamily: 'PoppinsSemiBold', fontSize: 18, color: '#666' },
+  emptySub: { fontFamily: 'Poppins', fontSize: 14, color: '#555', marginTop: 8, textAlign: 'center' },
+  emptyText: { fontFamily: 'Poppins', fontSize: 14, color: '#555', textAlign: 'center', marginTop: 40 },
+
+  // Chat view
+  chatHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#1c1c1e',
+  },
+  chatTitle: { fontFamily: 'Poppins', fontSize: 17, color: '#fff', flex: 1, textAlign: 'center', marginHorizontal: 12 },
+  messagesContainer: { flex: 1 },
+  messagesContent: { padding: 16, paddingBottom: 8, gap: 10 },
+  messageBubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
+  userBubble: { alignSelf: 'flex-end', backgroundColor: '#1c1c1e', borderWidth: 1, borderColor: '#FFD700' },
+  assistantBubble: { alignSelf: 'flex-start', backgroundColor: '#1c1c1e', borderWidth: 1, borderColor: '#2c2c2e' },
+  messageText: { fontFamily: 'Poppins', fontSize: 15, lineHeight: 21 },
+  userText: { color: '#fff' },
+  assistantText: { color: '#ddd' },
+  loadingBubble: { alignSelf: 'flex-start', padding: 12, backgroundColor: '#1c1c1e', borderRadius: 16 },
+  loadingDot: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', borderTopColor: '#FFD700',
+  },
+  inputBar: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: '#1c1c1e',
+  },
+  textInput: {
+    flex: 1, fontFamily: 'Poppins', fontSize: 15, color: '#fff',
+    backgroundColor: '#1c1c1e', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
+    maxHeight: 100,
+  },
+  sendButton: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#FFD700', alignItems: 'center', justifyContent: 'center',
+  },
+  sendDisabled: { backgroundColor: '#333' },
+});

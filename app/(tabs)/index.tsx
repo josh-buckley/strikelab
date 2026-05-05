@@ -1,345 +1,251 @@
 import { router } from 'expo-router';
-import { StyleSheet, TouchableOpacity, View, Animated, Easing } from 'react-native';
+import {
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  ScrollView,
+  Animated,
+  Easing,
+  Dimensions,
+} from 'react-native';
+import { Svg, Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState, useRef } from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { supabase } from '@/lib/supabase';
-import { getCurrentRank, getNextRank } from '@/data/ranks';
-import { LinearGradient } from 'expo-linear-gradient';
-
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/lib/AuthProvider';
-import { XPChartModal } from '@/components/XPChartModal';
+import {
+  fetchQuickStats,
+  fetchWeeklyRounds,
+  fetchWeeklyRoundsBreakdown,
+  fetchRecentWorkout,
+  fetchRecentTemplates,
+  fetchTopCombo,
+  QuickStats,
+  RecentWorkout,
+  RecentTemplate,
+  TopCombo,
+} from '@/lib/dashboardService';
 
-type CategoryData = {
-  name: string;
-  level: number;
-  xp: number;
-};
-
-const getProgressColor = (xp: number): [string, string] => {
-  return ['rgba(255, 255, 255, 0.8)', 'rgba(255, 255, 255, 0.8)'];
-};
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const CARD_GAP = 12;
+const CARD_WIDTH = (SCREEN_WIDTH - 32 - CARD_GAP) / 2;
 
 export default function HomeScreen() {
-  const theme = useColorScheme() ?? 'light';
-  const colors = Colors[theme];
   const { signOut, session } = useAuth();
-  const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const glowAnimation = useRef(new Animated.Value(0)).current;
+
+  const [quickStats, setQuickStats] = useState<QuickStats | null>(null);
+  const [roundsBreakdown, setRoundsBreakdown] = useState({ sparring: 0, partner: 0, pads: 0 });
+  const [recentWorkout, setRecentWorkout] = useState<RecentWorkout | null>(null);
+  const [recentTemplates, setRecentTemplates] = useState<RecentTemplate[]>([]);
+  const [topCombo, setTopCombo] = useState<TopCombo | null>(null);
+  const [dataLoading, setDataLoading] = useState(true);
+
   const rotateAnimation = useRef(new Animated.Value(0)).current;
   const isFocused = useIsFocused();
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [xpChartData, setXpChartData] = useState<{ labels: string[]; data: number[]; }>({
-    labels: [],
-    data: []
-  });
 
   useEffect(() => {
-    if (session?.user) {
-      console.log('Session user found, fetching levels...');
-      fetchUserLevels();
-    } else {
-      console.log('No session user found');
-    }
-  }, [session?.user]);
-
-  useEffect(() => {
-    let glowAnimationInstance: Animated.CompositeAnimation | null = null;
-    let rotateAnimationInstance: Animated.CompositeAnimation | null = null;
-
     if (isFocused) {
-      // Reset animations
-      glowAnimation.setValue(0);
       rotateAnimation.setValue(0);
-
-      // Start glow animation
-      const animateGlow = () => {
-        glowAnimationInstance = Animated.sequence([
-          Animated.timing(glowAnimation, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnimation, {
-            toValue: 0.3,
-            duration: 1500,
-            useNativeDriver: true,
-          })
-        ]);
-        
-        glowAnimationInstance.start(() => {
-          if (isFocused) {
-            animateGlow();
-          }
-        });
-      };
-
-      // Start rotate animation
-      rotateAnimationInstance = Animated.loop(
-        Animated.timing(rotateAnimation, {
-          toValue: 1,
-          duration: 3000,
-          useNativeDriver: true,
-          easing: Easing.linear
-        })
+      const loop = Animated.loop(
+        Animated.timing(rotateAnimation, { toValue: 1, duration: 8000, useNativeDriver: true, easing: Easing.linear })
       );
-
-      animateGlow();
-      rotateAnimationInstance.start();
+      loop.start();
+      return () => loop.stop();
     }
-
-    return () => {
-      glowAnimationInstance?.stop();
-      rotateAnimationInstance?.stop();
-    };
   }, [isFocused]);
 
-  async function fetchUserLevels() {
+  useEffect(() => {
+    if (session?.user) fetchDashboardData();
+    else setDataLoading(false);
+  }, [session?.user]);
+
+  async function fetchDashboardData() {
     try {
-      console.log('Fetching user levels...');
-      const { data, error } = await supabase
-        .from('user_levels')
-        .select('*')
-        .eq('user_id', session?.user?.id)
-        .single();
-
-      if (error) {
-        // If the error is PGRST116 (no rows returned), the levels might still be being created
-        if (error.code === 'PGRST116') {
-          console.log('Levels not found, waiting for creation...');
-          // Wait a bit and try again
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return fetchUserLevels();
-        }
-        throw error;
-      }
-
-      // Transform the data into the expected format based on the actual database schema
-      const categoryData = [
-        { 
-          name: 'Punches', 
-          level: data?.punches_level || 1,
-          xp: data?.punches_xp || 0
-        },
-        { 
-          name: 'Kicks', 
-          level: data?.kicks_level || 1,
-          xp: data?.kicks_xp || 0
-        },
-        { 
-          name: 'Elbows', 
-          level: data?.elbows_level || 1,
-          xp: data?.elbows_xp || 0
-        },
-        { 
-          name: 'Knees', 
-          level: data?.knees_level || 1,
-          xp: data?.knees_xp || 0
-        },
-        { 
-          name: 'Footwork', 
-          level: data?.footwork_level || 1,
-          xp: data?.footwork_xp || 0
-        },
-        { 
-          name: 'Clinch', 
-          level: data?.clinch_level || 1,
-          xp: data?.clinch_xp || 0
-        },
-        { 
-          name: 'Defense', 
-          level: data?.defensive_level || 1,
-          xp: data?.defensive_xp || 0
-        },
-        { 
-          name: 'Sweeps', 
-          level: data?.sweeps_level || 1,
-          xp: data?.sweeps_xp || 0
-        },
-        { 
-          name: 'Feints', 
-          level: data?.feints_level || 1,
-          xp: data?.feints_xp || 0
-        }
-      ];
-
-      console.log('Setting categories:', categoryData);
-      setCategories(categoryData);
+      setDataLoading(true);
+      const userId = session!.user.id;
+      const [stats, rounds, breakdown, workout, templates, combo] = await Promise.all([
+        fetchQuickStats(userId),
+        fetchWeeklyRounds(userId),
+        fetchWeeklyRoundsBreakdown(userId),
+        fetchRecentWorkout(userId),
+        fetchRecentTemplates(userId, 3),
+        fetchTopCombo(userId),
+      ]);
+      setQuickStats(stats);
+      setRoundsBreakdown(breakdown);
+      setRecentWorkout(workout);
+      setRecentTemplates(templates);
+      setTopCombo(combo);
     } catch (error) {
-      console.error('Error fetching user levels:', error);
-      // Don't throw the error, just log it and let the UI show default values
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setDataLoading(false);
     }
   }
 
-  const handleCreateWorkout = () => {
-    // Navigate using absolute path, which Expo Router should now resolve
-    // correctly due to the nested Stack setup in app/(tabs)/_layout.tsx
-    router.navigate('/create-workout/name'); 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const handleSignOut = async () => {
-    console.log('Sign out button pressed');
-    try {
-      await signOut();
-      console.log('Sign out completed');
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.replace('/(auth)/login');
-    } catch (error) {
-      console.error('Error in handleSignOut:', error);
-    }
-  };
+  const formatDuration = (seconds: number) => `${Math.floor(seconds / 60)} min`;
 
-  const handleTestOnboarding = () => {
-    router.replace('/(auth)/onboarding');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const totalLevel = categories.reduce((sum, category) => sum + category.level, 0);
-  const currentRank = getCurrentRank(totalLevel);
-  const nextRank = getNextRank(totalLevel);
-
-  // Add logging for render
-  console.log('Rendering HomeScreen with categories:', categories);
-
-  // Function to fetch XP history for a category
-  const fetchXPHistory = async (category: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('xp_history')
-        .select('xp_gained, created_at')
-        .eq('user_id', session!.user.id)
-        .eq('category', category.toLowerCase())
-        .order('created_at', { ascending: true })
-        .limit(10);
-
-      if (error) throw error;
-
-      if (data) {
-        const labels = data.map(entry => {
-          const date = new Date(entry.created_at);
-          return `${date.getMonth() + 1}/${date.getDate()}`;
-        });
-        
-        // Calculate cumulative XP
-        let cumulativeXP = 0;
-        const xpData = data.map(entry => {
-          cumulativeXP += entry.xp_gained;
-          return cumulativeXP;
-        });
-
-        setXpChartData({
-          labels,
-          data: xpData
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching XP history:', error);
-    }
-  };
-
-  const handleTilePress = async (category: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedCategory(category);
-    await fetchXPHistory(category);
-  };
+  const averagePerWeek = quickStats?.firstWorkoutDate
+    ? ((quickStats?.totalWorkouts || 0) / Math.max(1, (Date.now() - new Date(quickStats.firstWorkoutDate).getTime()) / (7 * 24 * 60 * 60 * 1000))).toFixed(1)
+    : '0.0';
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedView style={styles.header}>
-        <ThemedText type="title" style={[styles.title, { textDecorationLine: 'line-through', textDecorationColor: '#FFD700' }]}>
+      {/* Header — left aligned */}
+      <View style={styles.header}>
+        <ThemedText type="title" style={styles.title}>
           strikelab
         </ThemedText>
-        <TouchableOpacity
-          onPress={handleSignOut}
-          style={styles.headerButton}
-        >
-          <IconSymbol name="rectangle.portrait.and.arrow.right" size={24} color={colors.text} />
+        <TouchableOpacity onPress={async () => { await signOut(); router.replace('/(auth)/login'); }} style={styles.headerButton}>
+          <IconSymbol name="rectangle.portrait.and.arrow.right" size={20} color="#666" />
         </TouchableOpacity>
-      </ThemedView>
+      </View>
 
-      <ThemedView style={styles.contentContainer}>
-        <ThemedView style={styles.grid}>
-          {categories.map((category) => (
-            <TouchableOpacity
-              key={category.name}
-              style={[styles.tile, { backgroundColor: '#141414' }]}
-              onPress={() => handleTilePress(category.name)}
-            >
-              <ThemedView style={styles.tileContent}>
-                <ThemedView style={[styles.tileBackground, { backgroundColor: '#1c1c1e' }]}>
-                  <ThemedView style={[styles.tileHeader, { backgroundColor: '#1c1c1e' }]}>
-                    <ThemedText style={[styles.tileName, { backgroundColor: '#1c1c1e' }]}>
-                      {category.name}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {dataLoading ? (
+          <ThemedText style={styles.emptyText}>Loading...</ThemedText>
+        ) : (
+          <>
+            {/* Row 1: Rounds + Average */}
+            <View style={styles.cardRow}>
+              <View style={styles.card}>
+                <ThemedText style={styles.cardTitle}>Rounds This Week</ThemedText>
+                <View style={styles.roundBlock}>
+                  <View style={styles.roundRow}>
+                    <ThemedText style={styles.roundValue}>{roundsBreakdown.sparring}</ThemedText>
+                    <ThemedText style={styles.roundType}>Sparring</ThemedText>
+                  </View>
+                  <View style={styles.roundRow}>
+                    <ThemedText style={styles.roundValue}>{roundsBreakdown.partner}</ThemedText>
+                    <ThemedText style={styles.roundType}>Partner</ThemedText>
+                  </View>
+                  <View style={styles.roundRow}>
+                    <ThemedText style={styles.roundValue}>{roundsBreakdown.pads}</ThemedText>
+                    <ThemedText style={styles.roundType}>Pad</ThemedText>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <ThemedText style={styles.cardTitle}>Average</ThemedText>
+                <ThemedText style={styles.cardHero}>{averagePerWeek}</ThemedText>
+                <ThemedText style={styles.cardMeta}>workouts / week</ThemedText>
+              </View>
+            </View>
+
+            {/* Last Session + Coach Feedback — full width, two columns */}
+            <View style={styles.weeklyCard}>
+              <ThemedText style={styles.cardTitle}>Last Session</ThemedText>
+              <View style={styles.sessionRow}>
+                <View style={styles.sessionLeft}>
+                  {recentWorkout ? (
+                    <>
+                      <ThemedText style={styles.sessionName} numberOfLines={1}>{recentWorkout.name}</ThemedText>
+                      <ThemedText style={styles.cardMeta}>
+                        {formatDate(recentWorkout.createdAt)} · {formatDuration(recentWorkout.durationSeconds)}
+                      </ThemedText>
+                      <ThemedText style={styles.cardMeta}>{recentWorkout.comboCount} combos</ThemedText>
+                      {recentWorkout.trainingTypes.length > 0 && (
+                        <View style={styles.chipRow}>
+                          {recentWorkout.trainingTypes.slice(0, 2).map((type) => (
+                            <View key={type} style={styles.chip}>
+                              <ThemedText style={styles.chipText}>{type}</ThemedText>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <ThemedText style={styles.cardMeta}>No sessions yet</ThemedText>
+                  )}
+                </View>
+
+                <View style={styles.sessionRight}>
+                  <ThemedText style={styles.coachLabel}>Coach Tip</ThemedText>
+                  {recentWorkout?.notes ? (
+                    <ThemedText style={styles.coachFeedback} numberOfLines={3}>
+                      "{recentWorkout.notes}"
                     </ThemedText>
-                    <ThemedView style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#1c1c1e' }}>
-                      <ThemedText style={[styles.tileLevel, { backgroundColor: '#1c1c1e' }]}>
-                        Lv.
-                      </ThemedText>
-                      <ThemedText style={[styles.tileLevel, { backgroundColor: '#1c1c1e', fontSize: 17, fontFamily: 'PoppinsSemiBold', marginLeft: -2, color: '#FFD700' }]}>
-                        {category.level}
-                      </ThemedText>
-                    </ThemedView>
-                  </ThemedView>
-                  <ThemedView style={styles.progressBarContainer}>
-                    <ThemedView style={styles.progressBar}>
-                      <LinearGradient
-                        colors={getProgressColor(category.xp)}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={[
-                          styles.progressFill,
-                          { 
-                            width: `${(category.xp % 1000) / 10}%`,
-                          }
-                        ]}
-                      />
-                    </ThemedView>
-                  </ThemedView>
-                  <ThemedText style={styles.xpNeeded}>
-                    {1000 - (category.xp % 1000)} xp left
-                  </ThemedText>
-                </ThemedView>
-              </ThemedView>
-            </TouchableOpacity>
-          ))}
-        </ThemedView>
+                  ) : (
+                    <ThemedText style={styles.coachFeedback}>
+                      Log a workout to get feedback from your coach.
+                    </ThemedText>
+                  )}
+                </View>
+              </View>
+            </View>
 
-        <XPChartModal
-          visible={selectedCategory !== null}
-          onClose={() => setSelectedCategory(null)}
-          category={selectedCategory || ''}
-          xpData={xpChartData}
-          currentLevel={categories.find(c => c.name === selectedCategory)?.level || 1}
-          totalXP={categories.find(c => c.name === selectedCategory)?.xp || 0}
-        />
+            {/* Top Combo — full width */}
+            <View style={styles.weeklyCard}>
+              <ThemedText style={styles.cardTitle}>Top Combo</ThemedText>
+              {topCombo ? (
+                <View style={styles.topComboRow}>
+                  <ThemedText style={styles.cardHero}>{topCombo.count}</ThemedText>
+                  <View style={styles.topComboInfo}>
+                    <ThemedText style={styles.topComboName} numberOfLines={2}>{topCombo.techniques}</ThemedText>
+                    <ThemedText style={styles.cardMeta}>all time</ThemedText>
+                  </View>
+                </View>
+              ) : (
+                <ThemedText style={styles.cardMeta}>No data yet</ThemedText>
+              )}
+            </View>
 
-        <View style={styles.fabContainer}>
-          <Animated.View style={[
-            styles.rotatingCircle,
-            {
-              transform: [{
-                rotate: rotateAnimation.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0deg', '360deg']
-                })
-              }]
-            }
-          ]} />
-          <TouchableOpacity
-            style={styles.fabButton}
-            onPress={handleCreateWorkout}
-          >
-            <IconSymbol name="plus" size={36} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </ThemedView>
+            {/* Row 3: Streak */}
+            <View style={styles.cardRow}>
+              <View style={styles.card}>
+                <ThemedText style={styles.cardTitle}>Streak</ThemedText>
+                <ThemedText style={styles.cardHero}>{quickStats?.currentStreak || 0}</ThemedText>
+                <ThemedText style={styles.cardMeta}>days in a row</ThemedText>
+              </View>
+            </View>
+
+            {/* Templates */}
+            {recentTemplates.length > 0 && (
+              <>
+                <ThemedText style={styles.sectionTitle}>Templates</ThemedText>
+                {recentTemplates.map((tpl, i) => (
+                  <TouchableOpacity key={tpl.id} style={[styles.templateRow, i < recentTemplates.length - 1 && styles.templateRowBorder]}>
+                    <IconSymbol name="doc.text" size={18} color="#666" />
+                    <ThemedText style={styles.templateName}>{tpl.name}</ThemedText>
+                    <IconSymbol name="chevron.right" size={16} color="#333" />
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+
+            <View style={{ height: 120 }} />
+          </>
+        )}
+      </ScrollView>
+
+      {/* FAB */}
+      <View style={styles.fabContainer}>
+        <Animated.View style={[styles.rotatingRing, { transform: [{ rotate: rotateAnimation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }]}>
+          <Svg width={88} height={88} viewBox="0 0 88 88">
+            <Circle
+              cx={44}
+              cy={44}
+              r={42}
+              stroke="#FFD700"
+              strokeWidth={1.5}
+              strokeDasharray="22 10"
+              fill="none"
+            />
+          </Svg>
+        </Animated.View>
+        <TouchableOpacity style={styles.fabButton} onPress={() => { router.navigate('/create-workout/name'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}>
+          <IconSymbol name="plus" size={36} color="#fff" />
+        </TouchableOpacity>
+      </View>
     </ThemedView>
   );
 }
@@ -351,130 +257,195 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 24,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+  },
+  headerButton: {
+    padding: 4,
+    position: 'absolute',
+    right: 24,
   },
   title: {
     fontSize: 32,
     fontFamily: 'PoppinsSemiBold',
     lineHeight: 40,
+    textDecorationLine: 'line-through',
+    textDecorationColor: '#FFD700',
   },
-  logoutButton: {
-    padding: 8,
-    borderRadius: 8,
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16 },
+
+  // Card grid
+  cardRow: {
+    flexDirection: 'row',
+    gap: CARD_GAP,
+    marginBottom: 12,
+  },
+  card: {
+    width: CARD_WIDTH,
     backgroundColor: '#1c1c1e',
+    borderRadius: 12,
+    padding: 16,
+    minHeight: 140,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    gap: 3,
-  },
-  tile: {
-    width: '49.2%',
-    borderRadius: 8,
-    marginBottom: 3,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  tileContent: {
-    padding: 4,
-  },
-  tileBackground: {
-    padding: 10,
-    borderRadius: 6,
-  },
-  tileHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  tileName: {
-    fontSize: 16,
-    fontFamily: 'PoppinsSemiBold',
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 4,
-  },
-  tileLevel: {
-    fontSize: 13,
-    color: '#fff',
+  cardTitle: {
     fontFamily: 'Poppins',
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 4,
-  },
-  progressBarContainer: {
-    padding: 2,
-    backgroundColor: '#2c2c2e',
-    borderRadius: 4,
-    marginBottom: 4,
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: '#2c2c2e',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  buttonContainer: {
-    position: 'absolute',
-    bottom: '4%',
-    left: 16,
-    right: 16,
-    flexDirection: 'row',
-  },
-  actionButton: {
-    height: 52,
-    borderRadius: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    padding: 12,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontFamily: 'PoppinsSemiBold',
-    color: '#fff',
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#1c1c1e',
-  },
-  xpNeeded: {
     fontSize: 11,
     color: '#666',
-    fontFamily: 'Poppins',
-    textAlign: 'left',
-    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 6,
   },
+  cardHero: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 36,
+    color: '#FFD700',
+    lineHeight: 42,
+    marginBottom: 4,
+  },
+  cardMeta: {
+    fontFamily: 'Poppins',
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+
+  // Rounds card
+  roundBlock: { gap: 8 },
+  roundRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  roundValue: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 20,
+    color: '#FFD700',
+    lineHeight: 24,
+  },
+  roundType: {
+    fontFamily: 'Poppins',
+    fontSize: 13,
+    color: '#fff',
+  },
+
+  // Full-width card
+  weeklyCard: {
+    backgroundColor: '#1c1c1e',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+
+  // Session two-column layout
+  sessionRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  sessionLeft: { flex: 1 },
+  sessionRight: {
+    flex: 1,
+    borderLeftWidth: 1,
+    borderLeftColor: '#2c2c2e',
+    paddingLeft: 16,
+    justifyContent: 'flex-start',
+  },
+  sessionName: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 15,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  topComboRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  topComboInfo: { flex: 1 },
+  topComboName: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 15,
+    color: '#fff',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  chip: {
+    backgroundColor: '#2c2c2e',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  chipText: {
+    fontSize: 11,
+    fontFamily: 'Poppins',
+    color: '#fff',
+  },
+
+  // Coach feedback
+  coachLabel: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 12,
+    color: '#FFD700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  coachFeedback: {
+    fontFamily: 'Poppins',
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+    lineHeight: 17,
+  },
+
+  // Section title (for templates)
+  sectionTitle: {
+    fontFamily: 'Poppins',
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+    marginTop: 8,
+  },
+
+  // Templates
+  templateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  templateRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#2c2c2e',
+  },
+  templateName: {
+    fontFamily: 'Poppins',
+    fontSize: 15,
+    color: '#fff',
+    flex: 1,
+  },
+
+  // Empty / loading
+  emptyText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    fontFamily: 'Poppins',
+    padding: 24,
+    fontStyle: 'italic',
+  },
+
+  // FAB
   fabContainer: {
     position: 'absolute',
     bottom: '4%',
@@ -488,28 +459,18 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#262626',
+    backgroundColor: '#2c2c2e',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  rotatingCircle: {
+  rotatingRing: {
     position: 'absolute',
     width: 88,
     height: 88,
-    borderRadius: 44,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    borderTopColor: '#FFD700',
   },
-  contentContainer: {
-    flex: 1,
-  },
-}); 
+});

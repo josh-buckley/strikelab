@@ -120,7 +120,7 @@ export default function HistoryScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedView style={styles.header}>
-        <ThemedText style={[styles.title, { textDecorationLine: 'line-through', textDecorationColor: '#FFD700', color: '#fff' }]}>
+        <ThemedText type="title" style={[styles.title, { textDecorationLine: 'line-through', textDecorationColor: '#FFD700', color: '#fff' }]}>
           training days
         </ThemedText>
       </ThemedView>
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   title: {
     fontSize: 32,

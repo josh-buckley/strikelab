@@ -62,11 +62,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="video-coach"
+        name="timer"
         options={{
-          title: 'Video Coach',
+          title: 'Timer',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="videocam" size={size} color={color} />
+            <Ionicons name="timer-outline" size={size} color={color} />
           ),
         }}
       />
