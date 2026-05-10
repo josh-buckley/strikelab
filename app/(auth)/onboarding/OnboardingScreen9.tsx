@@ -6,9 +6,6 @@ import { Colors } from '@/constants/Colors';
 import OnboardingProgressBar from './OnboardingProgressBar';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useRouter } from 'expo-router';
-import { ROUTES } from '@/lib/routes';
-import { useAuth } from '@/lib/AuthProvider';
 
 // Define the props for the onboarding screen
 interface OnboardingScreenProps {
@@ -28,8 +25,6 @@ const OnboardingScreen9: React.FC<OnboardingScreenProps> = ({
   const colors = Colors[colorScheme ?? 'light'];
   const isDarkMode = colorScheme === 'dark';
   const [message, setMessage] = useState('');
-  const router = useRouter();
-  const { markOnboardingCompleted } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
   // Updated function to mark onboarding complete *before* navigating
@@ -39,14 +34,9 @@ const OnboardingScreen9: React.FC<OnboardingScreenProps> = ({
     console.log('OnboardingScreen9: Get Started pressed. Marking complete then navigating...');
     setIsLoading(true);
     try {
-      // 1. Mark onboarding as completed in the backend/state
-      await markOnboardingCompleted();
-      console.log('OnboardingScreen9: Onboarding marked as completed.');
-      
-      // 2. Navigate to login page
-      console.log('OnboardingScreen9: Navigating to login.');
-      router.replace(ROUTES.AUTH.LOGIN);
-      // Component likely unmounts, no need to setIsLoading(false) here
+      // Delegate to parent onboarding flow to keep navigation consistent.
+      await onNext();
+      // Component likely unmounts, no need to setIsLoading(false) here.
 
     } catch (error) {
       console.error('OnboardingScreen9: Error marking complete or navigating:', error);

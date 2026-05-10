@@ -7,6 +7,7 @@ import { usePaywall } from '@/contexts/PaywallContext';
 import { ROUTES } from '@/lib/routes';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { FEATURE_FLAGS } from '@/src/config/featureFlags';
 
 export default function PaywallScreen() {
   const { presentPaywall, isSubscribed, loading, setJustSubscribedFlag, checkJustSubscribedFlag } = usePaywall();
@@ -18,6 +19,13 @@ export default function PaywallScreen() {
   
   // Track if this is from onboarding completion
   const fromOnboarding = params.fromOnboarding === 'true';
+
+  // If subscriptions are disabled, redirect immediately
+  if (!FEATURE_FLAGS.ENABLE_SUBSCRIPTIONS) {
+    console.log('PaywallScreen: Subscriptions disabled, redirecting to login');
+    router.replace(ROUTES.AUTH.LOGIN);
+    return null; // Don't render anything
+  }
 
   console.log('PaywallScreen: Rendered with params:', { fromOnboarding, params });
 

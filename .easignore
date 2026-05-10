@@ -1,6 +1,7 @@
 # Speed up EAS uploads
 .git
 node_modules
+node_modules_old*
 ios/Pods
 ios/build
 android/.gradle

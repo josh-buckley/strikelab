@@ -3,10 +3,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
-  Animated,
-  Easing,
+  useWindowDimensions,
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedText } from '@/components/ThemedText';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -14,6 +14,18 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 type TimerState = 'idle' | 'running' | 'paused' | 'rest';
 
 export default function TimerScreen() {
+  const { width, height } = useWindowDimensions();
+  const timerSize = Math.min(width * 0.9, height * 0.55);
+
+  // Unlock orientation when timer is configured, lock to portrait when not
+  useEffect(() => {
+    if (configured) {
+      ScreenOrientation.unlockAsync();
+    }
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, [configured]);
   const [roundMinutes, setRoundMinutes] = useState(3);
   const [restMinutes, setRestMinutes] = useState(1);
   const [totalRounds, setTotalRounds] = useState(5);
@@ -26,22 +38,6 @@ export default function TimerScreen() {
   const [timeLeft, setTimeLeft] = useState(roundDuration);
   const [currentRound, setCurrentRound] = useState(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (state === 'running' || state === 'rest') {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.04, duration: 700, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-        ])
-      );
-      pulse.start();
-      return () => pulse.stop();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [state]);
 
   useEffect(() => {
     if (state === 'running' || state === 'rest') {
@@ -119,7 +115,7 @@ export default function TimerScreen() {
   const isRest = state === 'rest';
   const timerColor = isRest ? '#4CAF50' : '#FFD700';
 
-  // Configuration screen
+  // Configuration screen — fills the page
   if (!configured && state === 'idle') {
     return (
       <ThemedView style={styles.container}>
@@ -127,42 +123,44 @@ export default function TimerScreen() {
           <ThemedText style={styles.pageTitle}>timer</ThemedText>
         </ThemedView>
 
-        <ThemedView style={styles.configRow}>
-          <ThemedText style={styles.configLabel}>Rounds</ThemedText>
-          <ThemedView style={styles.stepper}>
-            <TouchableOpacity onPress={() => setTotalRounds(Math.max(1, totalRounds - 1))}>
-              <ThemedText style={styles.stepperButton}>−</ThemedText>
-            </TouchableOpacity>
-            <ThemedText style={styles.stepperValue}>{totalRounds}</ThemedText>
-            <TouchableOpacity onPress={() => setTotalRounds(Math.min(12, totalRounds + 1))}>
-              <ThemedText style={styles.stepperButton}>+</ThemedText>
-            </TouchableOpacity>
+        <ThemedView style={styles.configList}>
+          <ThemedView style={styles.configRow}>
+            <ThemedText style={styles.configLabel}>Rounds</ThemedText>
+            <ThemedView style={styles.stepper}>
+              <TouchableOpacity onPress={() => setTotalRounds(Math.max(1, totalRounds - 1))}>
+                <ThemedText style={styles.stepperButton}>−</ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={styles.stepperValue}>{totalRounds}</ThemedText>
+              <TouchableOpacity onPress={() => setTotalRounds(Math.min(12, totalRounds + 1))}>
+                <ThemedText style={styles.stepperButton}>+</ThemedText>
+              </TouchableOpacity>
+            </ThemedView>
           </ThemedView>
-        </ThemedView>
 
-        <ThemedView style={styles.configRow}>
-          <ThemedText style={styles.configLabel}>Round Length</ThemedText>
-          <ThemedView style={styles.stepper}>
-            <TouchableOpacity onPress={() => setRoundMinutes(Math.max(1, roundMinutes - 1))}>
-              <ThemedText style={styles.stepperButton}>−</ThemedText>
-            </TouchableOpacity>
-            <ThemedText style={styles.stepperValue}>{roundMinutes}m</ThemedText>
-            <TouchableOpacity onPress={() => setRoundMinutes(Math.min(10, roundMinutes + 1))}>
-              <ThemedText style={styles.stepperButton}>+</ThemedText>
-            </TouchableOpacity>
+          <ThemedView style={styles.configRow}>
+            <ThemedText style={styles.configLabel}>Round Length</ThemedText>
+            <ThemedView style={styles.stepper}>
+              <TouchableOpacity onPress={() => setRoundMinutes(Math.max(1, roundMinutes - 1))}>
+                <ThemedText style={styles.stepperButton}>−</ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={styles.stepperValue}>{roundMinutes}m</ThemedText>
+              <TouchableOpacity onPress={() => setRoundMinutes(Math.min(10, roundMinutes + 1))}>
+                <ThemedText style={styles.stepperButton}>+</ThemedText>
+              </TouchableOpacity>
+            </ThemedView>
           </ThemedView>
-        </ThemedView>
 
-        <ThemedView style={styles.configRow}>
-          <ThemedText style={styles.configLabel}>Rest</ThemedText>
-          <ThemedView style={styles.stepper}>
-            <TouchableOpacity onPress={() => setRestMinutes(Math.max(0, restMinutes - 1))}>
-              <ThemedText style={styles.stepperButton}>−</ThemedText>
-            </TouchableOpacity>
-            <ThemedText style={styles.stepperValue}>{restMinutes}m</ThemedText>
-            <TouchableOpacity onPress={() => setRestMinutes(Math.min(5, restMinutes + 1))}>
-              <ThemedText style={styles.stepperButton}>+</ThemedText>
-            </TouchableOpacity>
+          <ThemedView style={styles.configRow}>
+            <ThemedText style={styles.configLabel}>Rest</ThemedText>
+            <ThemedView style={styles.stepper}>
+              <TouchableOpacity onPress={() => setRestMinutes(Math.max(0, restMinutes - 1))}>
+                <ThemedText style={styles.stepperButton}>−</ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={styles.stepperValue}>{restMinutes}m</ThemedText>
+              <TouchableOpacity onPress={() => setRestMinutes(Math.min(5, restMinutes + 1))}>
+                <ThemedText style={styles.stepperButton}>+</ThemedText>
+              </TouchableOpacity>
+            </ThemedView>
           </ThemedView>
         </ThemedView>
 
@@ -205,12 +203,12 @@ export default function TimerScreen() {
         ))}
       </ThemedView>
 
-      {/* Timer */}
-      <TouchableOpacity style={styles.timerContainer} onPress={isActive ? pause : start} activeOpacity={0.8}>
-        <Animated.View style={[styles.timerRing, { borderColor: timerColor, transform: [{ scale: pulseAnim }] }]} />
-        <Animated.Text style={[styles.timerText, { color: timerColor, transform: [{ scale: pulseAnim }] }]}>
+      {/* Timer — static ring, dynamic sizing */}
+      <TouchableOpacity style={[styles.timerContainer, { width: timerSize, height: timerSize }]} onPress={isActive ? pause : start} activeOpacity={0.8}>
+        <View style={[styles.timerRing, { width: timerSize, height: timerSize, borderRadius: timerSize / 2, borderColor: timerColor }]} />
+        <ThemedText style={[styles.timerText, { fontSize: timerSize * 0.28, lineHeight: timerSize * 0.32, color: timerColor }]}>
           {formatTime(timeLeft)}
-        </Animated.Text>
+        </ThemedText>
       </TouchableOpacity>
 
       {/* Controls */}
@@ -240,7 +238,7 @@ const styles = StyleSheet.create({
     paddingTop: 80,
   },
 
-  // Header — matches training days style
+  // Header
   timerHeader: {
     marginBottom: 24,
   },
@@ -252,18 +250,24 @@ const styles = StyleSheet.create({
     textDecorationColor: '#FFD700',
     color: '#fff',
   },
+
+  // Config screen — fills available space
+  configList: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   configRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    paddingVertical: 16,
+    paddingVertical: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#2c2c2e',
   },
   configLabel: {
     fontFamily: 'Poppins',
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
     textTransform: 'uppercase',
     letterSpacing: 1.5,
@@ -271,45 +275,41 @@ const styles = StyleSheet.create({
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
+    gap: 24,
   },
   stepperButton: {
     fontFamily: 'Poppins',
-    fontSize: 24,
+    fontSize: 28,
     color: '#FFD700',
     paddingHorizontal: 8,
   },
   stepperValue: {
     fontFamily: 'PoppinsSemiBold',
-    fontSize: 18,
+    fontSize: 22,
     color: '#fff',
-    minWidth: 48,
+    minWidth: 52,
     textAlign: 'center',
   },
   startButton: {
-    marginTop: 48,
     backgroundColor: '#2c2c2e',
     borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 48,
-    alignSelf: 'center',
+    paddingVertical: 18,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: 32,
+    marginBottom: 64,
   },
   startButtonText: {
     fontFamily: 'PoppinsSemiBold',
-    fontSize: 16,
+    fontSize: 18,
     color: '#FFD700',
   },
-  startButtonSub: {
-    fontFamily: 'Poppins',
-    fontSize: 13,
-    marginTop: 16,
-    opacity: 0.4,
-  },
+
   // Timer screen
   roundInfo: {
     alignItems: 'center',
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   roundLabel: {
     fontFamily: 'PoppinsSemiBold',
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 36,
+    marginBottom: 24,
     alignSelf: 'center',
   },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2c2c2e' },
@@ -336,23 +336,16 @@ const styles = StyleSheet.create({
   dotNext: { backgroundColor: '#4CAF50' },
 
   timerContainer: {
-    width: 220,
-    height: 220,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 48,
     alignSelf: 'center',
   },
   timerRing: {
     position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
     borderWidth: 2,
   },
   timerText: {
     fontFamily: 'PoppinsSemiBold',
-    fontSize: 56,
   },
 
   controls: {
@@ -360,6 +353,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 28,
     alignSelf: 'center',
+    marginTop: 32,
   },
   controlButton: {
     width: 48,

@@ -59,24 +59,19 @@ Your response must be ONLY the JSON object with this exact format:
 {
   "combos": [
     {
-      "type": "string",
-      "sparringIntensity"?: "Technical" | "Light" | "Medium" | "Hard",
-      "mode"?: "string",
-      "rounds"?: number,
-      "roundMinutes"?: number,
-      "roundSeconds"?: number,
-      "minutes"?: number,
-      "seconds"?: number,
-      "sets"?: number,
-      "reps"?: number,
-      "distance"?: number,
-      "distanceUnit"?: "km" | "mi",
-      "techniques"?: string[]
+      "type": "Sparring",
+      "sparringIntensity": "Light",
+      "mode": "Rounds",
+      "rounds": 3,
+      "roundMinutes": 3,
+      "techniques": ["Jab", "Cross", "Switch Kick"]
     }
   ]
 }
 
-IMPORTANT: Do NOT wrap your response in markdown code blocks (\`\`\`json ... \`\`\`). Return ONLY the raw JSON.`;
+Fields are only included when relevant. Valid types: "Partner Drills", "Heavy Bag", "Thai Pads", "Focus Mitts", "Shadow Boxing", "Warm-Up", "Running", "Skipping", "Sparring". Valid sparring intensities: "Technical", "Light", "Medium", "Hard". Valid modes: "Rounds", "Time", "Reps", "Distance".
+
+IMPORTANT: Do NOT wrap your response in markdown code blocks. Return ONLY the raw JSON.`;
 
 const ProcessingText = ({ text }: { text: string }) => {
   const progress = useSharedValue(0);
@@ -241,37 +236,57 @@ export default function VoiceTest() {
         // Log the raw response for debugging
         console.log('Raw AI response:', response);
         
-        // Clean the response by removing markdown code fences and any leading/trailing whitespace
-        const cleanedResponse = response
-          .replace(/^```(?:json)?/, '') // Remove opening code fence
-          .replace(/```$/, '')          // Remove closing code fence
-          .trim();                      // Remove whitespace
+        // Clean the response — find the first { and last }, extract just the JSON
+        const jsonStart = response.indexOf('{');
+        const jsonEnd = response.lastIndexOf('}');
+        let cleanedResponse = '';
+        if (jsonStart !== -1 && jsonEnd > jsonStart) {
+          cleanedResponse = response.substring(jsonStart, jsonEnd + 1);
+        } else {
+          // Fallback: try stripping code fences
+          cleanedResponse = response
+            .replace(/^```(?:json)?/i, '')
+            .replace(/```$/i, '')
+            .trim();
+        }
         
         const parsedResponse = JSON.parse(cleanedResponse);
         if (parsedResponse.combos) {
           // Add IDs to each combo and format techniques as string
-          const combosWithIds = parsedResponse.combos.map((combo: any) => ({
-            ...combo,
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            minutes: combo.minutes?.toString(),
-            seconds: combo.seconds !== undefined ? combo.seconds.toString().padStart(2, '0') : undefined,
-            // Convert techniques array to string format if it exists, with capitalized names
-            techniques: Array.isArray(combo.techniques) 
-              ? combo.techniques
-                  .map((t: string) => t.split(' ')
-                    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-                    .join(' ')
-                  )
-                  .join(' - ') 
-              : undefined,
-            // Convert numeric values to strings to match Combo type
-            sets: combo.sets?.toString(),
-            reps: combo.reps?.toString(),
-            rounds: combo.rounds?.toString(),
-            roundMinutes: combo.roundMinutes?.toString(),
-            roundSeconds: combo.roundSeconds !== undefined ? combo.roundSeconds.toString().padStart(2, '0') : undefined,
-            distance: combo.distance?.toString()
-          }));
+          const combosWithIds = parsedResponse.combos.map((combo: any, index: number) => {
+            // Merge sparring type + intensity into the type field
+            let trainingType = combo.type || 'Heavy Bag';
+            if (combo.sparringIntensity && trainingType.toLowerCase().includes('sparring')) {
+              trainingType = `${combo.sparringIntensity} Sparring`;
+            }
+            // Capitalize type to match TrainingType
+            trainingType = trainingType.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+            return {
+              id: Date.now().toString() + index,
+              type: trainingType,
+              mode: combo.mode || 'Rounds',
+              minutes: combo.minutes?.toString(),
+              seconds: combo.seconds !== undefined ? combo.seconds.toString().padStart(2, '0') : undefined,
+              // Convert techniques array to string format if it exists, with capitalized names
+              techniques: Array.isArray(combo.techniques) 
+                ? combo.techniques
+                    .map((t: string) => t.split(' ')
+                      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(' ')
+                    )
+                    .join(' - ') 
+                : undefined,
+              // Convert numeric values to strings to match Combo type
+              sets: combo.sets?.toString(),
+              reps: combo.reps?.toString(),
+              rounds: combo.rounds?.toString(),
+              roundMinutes: combo.roundMinutes?.toString(),
+              roundSeconds: combo.roundSeconds !== undefined ? combo.roundSeconds.toString().padStart(2, '0') : undefined,
+              distance: combo.distance?.toString(),
+              distanceUnit: combo.distanceUnit,
+            };
+          });
           setCombos(combosWithIds);
           router.push('/create-workout/techniques');
         } else {

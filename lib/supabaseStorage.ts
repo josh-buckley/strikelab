@@ -1,28 +1,28 @@
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const supabaseStorage = {
   getItem: async (key: string): Promise<string | null> => {
     try {
-      return await SecureStore.getItemAsync(key);
+      return await AsyncStorage.getItem(key);
     } catch (e) {
-      console.error('Error reading from SecureStore:', e);
+      console.error('Error reading from AsyncStorage:', e);
       return null;
     }
   },
 
   setItem: async (key: string, value: string): Promise<void> => {
     try {
-      await SecureStore.setItemAsync(key, value);
+      await AsyncStorage.setItem(key, value);
     } catch (e) {
-      console.error('Error saving to SecureStore:', e);
+      console.error('Error saving to AsyncStorage:', e);
     }
   },
 
   removeItem: async (key: string): Promise<void> => {
     try {
-      await SecureStore.deleteItemAsync(key);
+      await AsyncStorage.removeItem(key);
     } catch (e) {
-      console.error('Error removing from SecureStore:', e);
+      console.error('Error removing from AsyncStorage:', e);
     }
   },
-}; 
+};

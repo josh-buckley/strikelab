@@ -156,7 +156,7 @@ export async function ensureUserProfile(
     const today = new Date().toISOString().split('T')[0];
     const { data: existingTracker, error: trackerCheckError } = await supabase
       .from('daily_xp_tracker')
-      .select('id')
+      .select('user_id')
       .eq('user_id', user.id)
       .eq('date', today)
       .single();

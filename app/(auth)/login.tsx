@@ -9,6 +9,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { usePaywall } from '@/contexts/PaywallContext';
+import { FEATURE_FLAGS } from '@/src/config/featureFlags';
 import { useAuth } from '@/lib/AuthProvider';
 import { ensureUserProfile } from '@/lib/userProfile';
 
@@ -23,8 +24,40 @@ export default function Login() {
   const { presentPaywall, isSubscribed } = usePaywall();
   const { markOnboardingCompleted } = useAuth();
 
-  // New useEffect to present paywall on mount
+  // Debug: Test Supabase connectivity on mount (disabled for testing)
+  // useEffect(() => {
+  //   const testConnection = async () => {
+  //     const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  //     if (!supabaseUrl) {
+  //       Alert.alert('Debug', 'Supabase URL: NOT SET');
+  //       return;
+  //     }
+  //     try {
+  //       const response = await fetch(`${supabaseUrl}/auth/v1/health`, {
+  //         method: 'GET',
+  //         headers: { 'Content-Type': 'application/json' },
+  //       });
+  //       Alert.alert(
+  //         'Debug - Connection Test',
+  //         `URL: ${supabaseUrl.substring(0, 35)}...\nStatus: ${response.status}\nOK: ${response.ok}`
+  //       );
+  //     } catch (error: any) {
+  //       Alert.alert(
+  //         'Debug - Connection FAILED',
+  //         `URL: ${supabaseUrl.substring(0, 35)}...\nError: ${error.message}`
+  //       );
+  //     }
+  //   };
+  //   testConnection();
+  // }, []);
+
+  // New useEffect to present paywall on mount (guarded by feature flag)
   useEffect(() => {
+    if (!FEATURE_FLAGS.ENABLE_SUBSCRIPTIONS) {
+      // Subscriptions disabled – skip paywall entirely
+      return;
+    }
+
     const showPaywall = async () => {
       console.log('Login: Component mounted, attempting to present paywall');
       try {
@@ -114,55 +147,40 @@ export default function Login() {
 
       console.log('User created successfully:', user.id);
 
-      // Check if email confirmation is required before proceeding
-      if (user.identities?.length === 0) {
-        console.log('Email confirmation required');
-        setError('Please check your email to confirm your account before signing in');
-        setLoading(false);
-        return;
+      // After signup, immediately sign in to get a session
+      console.log('Signing in after signup to establish session...');
+      const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        console.error('Sign in after signup failed:', signInError);
+        // If sign in fails, it might be due to email confirmation
+        if (signInError.message?.includes('Email not confirmed')) {
+          setError('Please check your email to confirm your account before signing in');
+          setLoading(false);
+          return;
+        }
+        throw signInError;
       }
 
-      try {
-        // Ensure we have a valid session before proceeding
-        let attempt = 0;
-        let initialSession = null;
-        while (!initialSession && attempt < 5) {
-          const { data: sessionData } = await supabase.auth.getSession();
-          initialSession = sessionData.session;
-          if (!initialSession) {
-            attempt++;
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        }
-
-        if (!initialSession) {
-          throw new Error('No valid session after signup and retries');
-        }
-
-        // Use shared profile creation function
-        console.log('Login: Ensuring user profile exists...');
-        const profileResult = await ensureUserProfile(user);
-
-        if (!profileResult.success) {
-          throw new Error(profileResult.error || 'Failed to create user profile');
-        }
-
-        console.log('Account setup complete. User can now use the app.');
-        router.replace('/(tabs)');
-
-      } catch (initError) {
-        console.error('Error during data initialization:', initError);
-        // Clean up the created user if data initialization fails
-        await supabase.auth.signOut();
-        const { error: deleteError } = await supabase.rpc('delete_user_by_id', { user_id_to_delete: user.id });
-        if (deleteError) {
-          console.error('Failed to clean up user after init error:', deleteError);
-        } else {
-          console.log('Cleaned up user after init error.');
-        }
-
-        setError('Failed to initialize user data. Please try signing up again.');
+      if (!signInData.session) {
+        throw new Error('No session established after signup and sign in');
       }
+
+      console.log('Session established, ensuring user profile exists...');
+      
+      // Use shared profile creation function
+      console.log('Login: Ensuring user profile exists...');
+      const profileResult = await ensureUserProfile(user);
+
+      if (!profileResult.success) {
+        throw new Error(profileResult.error || 'Failed to create user profile');
+      }
+
+      console.log('Account setup complete. User can now use the app.');
+      router.replace('/(tabs)');
 
     } catch (error: any) {
       console.error('Detailed signup error:', {
@@ -214,7 +232,15 @@ export default function Login() {
       const tokenPreview = appleCredential.identityToken.substring(0, 20) + '...' + appleCredential.identityToken.substring(appleCredential.identityToken.length - 20);
       console.log('Successfully received Apple credentials. Token preview:', tokenPreview);
       console.log('Attempting to sign in with Supabase using Apple token...');
-      
+
+      // Log the Supabase URL being used (for debugging)
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      console.log('Supabase URL for auth:', supabaseUrl ? supabaseUrl.substring(0, 40) + '...' : 'NOT SET - THIS IS THE PROBLEM');
+
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL is not configured. Please check environment variables.');
+      }
+
       let supabaseResponse;
       try {
         supabaseResponse = await supabase.auth.signInWithIdToken({
@@ -223,7 +249,15 @@ export default function Login() {
         });
         console.log('Supabase auth response received');
       } catch (supabaseError: any) {
-        console.error('Exception during Supabase auth call:', JSON.stringify({ message: supabaseError.message, stack: supabaseError.stack }, null, 2));
+        console.error('Exception during Supabase auth call:', JSON.stringify({
+          message: supabaseError.message,
+          stack: supabaseError.stack,
+          cause: supabaseError.cause
+        }, null, 2));
+        // Check if it's a network error
+        if (supabaseError.message?.includes('Network request failed')) {
+          throw new Error('Network error connecting to Supabase. Please check your internet connection and try again.');
+        }
         throw new Error(`Supabase authentication call failed: ${supabaseError.message}`);
       }
       
@@ -286,7 +320,6 @@ export default function Login() {
       </ThemedView>
 
       <ThemedView style={[styles.content, { paddingTop: 24 }]}>
-        {/* Email and password fields commented out for testing
         <TextInput
           style={[
             styles.input,
@@ -321,13 +354,11 @@ export default function Login() {
           onChangeText={setPassword}
           secureTextEntry
         />
-        */}
 
         {error && (
           <ThemedText style={styles.error}>{error}</ThemedText>
         )}
 
-        {/* Email signin buttons commented out for testing
         <TouchableOpacity
           style={[
             styles.button,
@@ -357,7 +388,6 @@ export default function Login() {
         </TouchableOpacity>
 
         <ThemedText style={styles.orDivider}>or</ThemedText>
-        */}
 
         {Platform.OS === 'ios' && (
           <AppleAuthentication.AppleAuthenticationButton

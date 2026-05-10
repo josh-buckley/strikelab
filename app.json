@@ -32,7 +32,7 @@
         "applinks:api.superwall.me"
       ],
       "splash": {
-        "image": "./assets/images/splash-logo.png",
+        "image": "./assets/images/transparent.png",
         "resizeMode": "cover",
         "backgroundColor": "#151718"
       }
@@ -57,7 +57,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-logo.png",
+          "image": "./assets/images/transparent.png",
           "resizeMode": "cover",
           "backgroundColor": "#151718",
           "imageResizeMode": "cover",
@@ -82,7 +82,7 @@
     },
     "owner": "josh-buckley",
     "splash": {
-      "image": "./assets/images/splash-logo.png",
+      "image": "./assets/images/transparent.png",
       "resizeMode": "cover",
       "backgroundColor": "#151718"
     }

@@ -9,8 +9,8 @@ import { usePaywall } from '@/contexts/PaywallContext';
 
 export default function AuthLayout() {
   // Only need session and loading from useAuth for redirection logic here
-  const { session, loading } = useAuth(); 
-  const { isSubscribed, checkJustSubscribedFlag } = usePaywall();
+  const { session, loading: authLoading } = useAuth();
+  const { isSubscribed, loading: subscriptionLoading, checkJustSubscribedFlag } = usePaywall();
   const segments = useSegments();
   const router = useRouter();
   const [justSubscribed, setJustSubscribed] = useState(false); // Keep for potential post-paywall logic if needed
@@ -20,19 +20,20 @@ export default function AuthLayout() {
     // Check subscription flag status - useful if paywall is presented outside login later
     const justSubscribedFlag = await checkJustSubscribedFlag();
     setJustSubscribed(justSubscribedFlag);
-    
+
     console.log('AuthLayout: Effect running', {
       hasSession: !!session,
       isSubscribed,
       justSubscribed: justSubscribedFlag,
-      loading,
+      authLoading,
+      subscriptionLoading,
       segments,
       currentSegment: segments.length > 1 ? segments[1] : segments[0],
     });
-    
-    // If loading session state, wait
-    if (loading) {
-      console.log('AuthLayout: Still loading session, waiting...');
+
+    // Wait for both auth and subscription states to load
+    if (authLoading || subscriptionLoading) {
+      console.log('AuthLayout: Still loading auth or subscription state, waiting...');
       return;
     }
 
@@ -96,7 +97,7 @@ export default function AuthLayout() {
       }
     }
 
-  }, [session, loading, isSubscribed, segments, checkJustSubscribedFlag, router]); // Dependencies updated
+  }, [session, authLoading, subscriptionLoading, isSubscribed, segments, checkJustSubscribedFlag, router]);
 
   // Single effect to handle all auth flow checks
   useEffect(() => {

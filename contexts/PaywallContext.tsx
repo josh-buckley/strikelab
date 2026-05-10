@@ -1,28 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Platform } from 'react-native';
-import Superwall from '@superwall/react-native-superwall';
+import Constants from 'expo-constants';
 import { useAuth } from '@/lib/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  initializeRevenueCat,
-  identifyUser,
-  resetUser,
-  getSubscriptionDetails,
-  restorePurchases,
-  syncPurchases,
-  PRODUCT_IDS,
-  setupCustomerInfoListener
-} from '@/lib/revenueCat';
 import { ensureUserProfile } from '@/lib/userProfile';
+import { FEATURE_FLAGS } from '@/src/config/featureFlags';
 
 // Key for the "just subscribed" flag
 const JUST_SUBSCRIBED_KEY = 'strikelab_just_subscribed';
 // Key for tracking subscription status in AsyncStorage
 const IS_SUBSCRIBED_KEY = 'strikelab_is_subscribed';
 // Key for tracking if paywall has been shown this session
-const HAS_SHOWN_PAYWALL_KEY = 'strikelab_has_shown_paywall_session';
+const HAS_SHOWN_PAY_WALL_KEY = 'strikelab_has_shown_paywall_session';
 
 interface PaywallContextType {
   isSubscribed: boolean;
@@ -47,12 +38,68 @@ const SUBSCRIPTION_VERIFY_INTERVAL = 1000 * 60 * 60; // 1 hour
 export function PaywallProvider({ children }: { children: React.ReactNode }) {
   console.log('PaywallProvider initializing');
 
+  // ---- FEATURE FLAG GUARD ----
+  if (!FEATURE_FLAGS.ENABLE_SUBSCRIPTIONS) {
+    // ----- MOCK SUBSCRIPTION STATE (free mode) -----
+    const [isSubscribed, setIsSubscribed] = useState(true);
+    const [isTrialActive, setIsTrialActive] = useState(false);
+    const [subscriptionType, setSubscriptionType] = useState<'monthly' | 'annual' | null>('monthly');
+    const [loading, setLoading] = useState(false);
+    const [hasShownPaywall, setHasShownPaywall] = useState(false);
+    const { session } = useAuth();
+
+    // Mock implementations – just return expected values
+    const presentPaywall = async (_identifier: string) => {
+      // No-op: do not show paywall
+      console.log('Paywall disabled: presentPaywall called but ignored');
+    };
+    const checkSubscription = async (): Promise<boolean> => {
+      // Immediately resolve to true (subscribed)
+      setLoading(false);
+      return true;
+    };
+    const restoreSubscription = async () => {
+      // No-op
+      setLoading(false);
+    };
+    const setJustSubscribedFlag = async () => {};
+    const clearJustSubscribedFlag = async () => {};
+    const checkJustSubscribedFlag = async (): Promise<boolean> => false;
+    const resetPaywallShownFlag = () => {
+      setHasShownPaywall(false);
+    };
+
+    const contextValue = {
+      isSubscribed,
+      loading,
+      presentPaywall,
+      checkSubscription,
+      isTrialActive,
+      subscriptionType,
+      restoreSubscription,
+      setJustSubscribedFlag,
+      clearJustSubscribedFlag,
+      checkJustSubscribedFlag,
+      hasShownPaywall,
+      resetPaywallShownFlag,
+    };
+
+    console.log('PaywallProvider running in FREE mode (subscriptions disabled)');
+    return (
+      <PaywallContext.Provider value={contextValue}>
+        {children}
+      </PaywallContext.Provider>
+    );
+  }
+
+  // ---- ORIGINAL CODE (subscriptions enabled) ----
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isTrialActive, setIsTrialActive] = useState(false);
   const [subscriptionType, setSubscriptionType] = useState<'monthly' | 'annual' | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasShownPaywall, setHasShownPaywall] = useState(false);
   const { session } = useAuth();
+  const isDevSimulator = __DEV__ && Constants.isDevice === false;
 
   // Reset paywall shown flag (e.g., when user signs out)
   const resetPaywallShownFlag = useCallback(() => {
@@ -64,26 +111,42 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log('PaywallProvider initialization effect running');
     let mounted = true;
-    
+
+    // Add timeout to prevent hanging indefinitely
+    const timeoutId = setTimeout(() => {
+      console.log('PaywallProvider: Initialization timed out after 15s');
+      if (mounted) {
+        setLoading(false);
+      }
+    }, 15000);
+
     const initializeServices = async () => {
       try {
+        // Dynamically require packages only when subscriptions are enabled
+        // This prevents Metro from failing to resolve uninstalled packages
+        const Superwall = require('@superwall/react-native-superwall').default;
+        const { 
+          initializeRevenueCat, 
+          setupCustomerInfoListener 
+        } = require('@/lib/revenueCat');
+
         // Check if there's a stored subscription status first
         const [storedSubscriptionStatus, storedSubscriptionType, storedTrialStatus] = await Promise.all([
           AsyncStorage.getItem(IS_SUBSCRIBED_KEY),
           AsyncStorage.getItem('strikelab_subscription_type'),
           AsyncStorage.getItem('strikelab_is_trial')
         ]);
-        
+
         if (storedSubscriptionStatus === 'true' && mounted) {
           console.log('Found stored subscription status: subscribed');
           setIsSubscribed(true);
           setSubscriptionType(storedSubscriptionType as 'monthly' | 'annual' | null || 'monthly');
           setIsTrialActive(storedTrialStatus === 'true');
         }
-        
+
         // Initialize Superwall
-        const superwallKey = Platform.OS === "ios" 
-          ? process.env.EXPO_PUBLIC_SUPERWALL_IOS_KEY 
+        const superwallKey = Platform.OS === "ios"
+          ? process.env.EXPO_PUBLIC_SUPERWALL_IOS_KEY
           : process.env.EXPO_PUBLIC_SUPERWALL_ANDROID_KEY;
 
         if (!superwallKey) {
@@ -112,6 +175,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error('Error initializing services:', error);
       } finally {
+        clearTimeout(timeoutId);
         if (mounted) {
           setLoading(false);
         }
@@ -126,6 +190,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
       clearTimeout(initTimer);
+      clearTimeout(timeoutId);
     };
   }, []);
 
@@ -135,7 +200,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     const result = await ensureUserProfile(user);
     if (!result.success) {
       console.error('PaywallContext: Failed to ensure user profile:', result.error);
-      // Don't throw - user is still subscribed, just log error
     }
   };
 
@@ -437,6 +501,13 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
   const presentPaywall = async (identifier: string) => {
     console.log('PaywallContext: Attempting to present paywall with identifier:', identifier);
 
+    if (isDevSimulator) {
+      console.log('PaywallContext: Dev simulator detected, bypassing paywall with temporary subscription.');
+      await setJustSubscribedFlag();
+      await updateSubscriptionState(true, 'monthly', false);
+      return;
+    }
+
     // Check if already subscribed - no need to show paywall
     if (isSubscribed) {
       console.log('PaywallContext: User already subscribed, skipping paywall');
@@ -464,8 +535,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
 
         try {
           // IMPORTANT: Sync purchases with RevenueCat first
-          // When Superwall handles a purchase via StoreKit, RevenueCat may not know about it yet
-          // This is critical for App Store review where sandbox purchases need to be synced
           console.log('PaywallContext: Syncing purchases with RevenueCat...');
           try {
             await syncPurchases();
@@ -503,7 +572,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
                 await ensureSessionValid();
               } catch (sessionError) {
                 console.log(`PaywallContext: No valid session (attempt ${attempts + 1}), continuing anyway for anonymous purchase`);
-                // Don't skip - anonymous purchases are valid
               }
 
               const subscriptionDetails = await getSubscriptionDetails();
@@ -551,7 +619,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
             console.log('PaywallContext: Failed to verify subscription after initial attempts');
 
             // RevenueCat may take longer to process sandbox receipts (used during App Store review)
-            // Try additional attempts with longer delays before giving up
             console.log('PaywallContext: Attempting extended verification for potential sandbox purchase');
 
             let extendedAttempts = 0;
@@ -599,15 +666,11 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
                 }
               } catch (receiptError) {
                 console.error('PaywallContext: Receipt-based fallback failed:', receiptError);
-                // At this point, we've exhausted all options
-                // The purchase may have failed or there's a genuine issue
               }
             }
 
             if (!subscriptionVerified) {
               console.error('PaywallContext: Unable to verify subscription after all attempts');
-              // Don't show an error to the user - let them try again or contact support
-              // The Superwall paywall should have already handled the purchase result
             }
           }
         } catch (checkError) {
@@ -670,7 +733,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PaywallContext.Provider value={contextValue}>
-      {children}
+        {children}
     </PaywallContext.Provider>
   );
 }
@@ -681,4 +744,4 @@ export function usePaywall() {
     throw new Error('usePaywall must be used within a PaywallProvider');
   }
   return context;
-} 
+}

@@ -10,29 +10,9 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useWorkout } from '@/contexts/WorkoutContext';
-import { techniques } from '@/data/strikes';
-import type { Technique } from '@/data/strikes';
+import { useAuth } from '@/lib/AuthProvider';
+import { supabase } from '@/lib/supabase';
 import { sendMessage } from '@/lib/openai';
-
-const TAG_GENERATION_PROMPT = `You are a Muay Thai technique analyzer. Given a training note, extract relevant techniques and concepts that were discussed or implied.
-
-Return a JSON object with an array of tags. Include both:
-1. Specific techniques mentioned (e.g., Jab, Cross, Switch Kick)
-2. General categories when discussed (e.g., Punches, Kicks, Defense)
-
-Rules:
-- Capitalize each word in the tags
-- Only include techniques/concepts that are explicitly mentioned or strongly implied
-- Return ONLY a JSON object in this exact format: { "tags": ["Tag1", "Tag2", "Tag3"] }
-- If no techniques are mentioned, return { "tags": [] }
-
-Example input: "Coach said my jab is getting snappier but I need to work on my teep timing"
-Example output: { "tags": ["Jab", "Teep", "Punches", "Kicks"] }
-
-Example input: "Worked on defensive footwork and catching kicks"
-Example output: { "tags": ["Defense", "Footwork", "Catch", "Kicks"] }
-
-Note: `;
 
 // Function to generate tags from notes using LLM
 async function generateTags(notes: string): Promise<string[]> {
@@ -57,7 +37,6 @@ Analyze this note: "${notes}"`
     ]);
     
     try {
-      // Parse the response content as JSON
       const parsedContent = JSON.parse(response);
       return parsedContent.tags || [];
     } catch (parseError) {
@@ -72,10 +51,12 @@ Analyze this note: "${notes}"`
 
 export default function NotesScreen() {
   const { workoutName, notes, setNotes, combos } = useWorkout();
+  const { session } = useAuth();
   const theme = useColorScheme() ?? 'light';
   const colors = Colors[theme];
   const rotateAnimation = useRef(new Animated.Value(0)).current;
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const animate = () => {
@@ -88,7 +69,6 @@ export default function NotesScreen() {
         })
       ).start();
     };
-
     animate();
   }, []);
 
@@ -97,123 +77,81 @@ export default function NotesScreen() {
   };
 
   const handleContinue = async () => {
+    if (!session?.user) {
+      setError('Not signed in');
+      return;
+    }
+
     try {
       setIsProcessing(true);
+      setError(null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       
       // Generate tags from notes
-      const generatedTags = await generateTags(notes.trim());
-      
-      // Calculate XP for each combo and prepare workout data
-      const workoutData = {
-        name: workoutName,
-        combos: combos.map(combo => {
-          // Base XP calculation
-          let baseXP = 0;
-          
-          if (combo.techniques) {
-            // Split techniques string into array
-            const techniqueNames = combo.techniques.split(' - ');
-            
-            // Calculate XP for each technique based on complexity
-            baseXP = techniqueNames.reduce((total, techniqueName) => {
-              const technique = techniques.find((t: Technique) => t.name === techniqueName);
-              if (!technique) return total;
+      const generatedTags = notes.trim() ? await generateTags(notes.trim()) : [];
 
-              // Base XP by category
-              let techniqueXP = 0;
-              switch (technique.category) {
-                case 'Punches':
-                  techniqueXP = 80;
-                  break;
-                case 'Kicks':
-                  techniqueXP = 120;
-                  break;
-                case 'Elbows':
-                  techniqueXP = 100;
-                  break;
-                case 'Knees':
-                  techniqueXP = 100;
-                  break;
-                case 'Sweeps':
-                  techniqueXP = 150;
-                  break;
-                case 'Clinch':
-                  techniqueXP = 120;
-                  break;
-                case 'Defensive':
-                  techniqueXP = 100;
-                  break;
-                case 'Footwork':
-                  techniqueXP = 80;
-                  break;
-                case 'Feints':
-                  techniqueXP = 60;
-                  break;
-                default:
-                  techniqueXP = 100;
-              }
+      // 1. Create the workout
+      const { data: workout, error: workoutError } = await (supabase
+        .from('workouts') as any)
+        .insert({
+          user_id: session.user.id,
+          name: workoutName || 'Workout',
+          completed_at: new Date().toISOString()
+        })
+        .select()
+        .single();
 
-              // Bonus XP for versatility
-              if (technique.targets.length > 1) {
-                techniqueXP *= 1.1;
-              }
-              if (technique.ranges.length > 1) {
-                techniqueXP *= 1.1;
-              }
+      if (workoutError) throw workoutError;
 
-              // Bonus XP for special variations
-              if (technique.name.toLowerCase().includes('spinning') || 
-                  technique.name.toLowerCase().includes('jump') ||
-                  technique.name.toLowerCase().includes('switch') ||
-                  technique.name.toLowerCase().includes('flying')) {
-                techniqueXP *= 1.25;
-              }
+      // 2. Save notes if they exist
+      const workoutId = (workout as any).id;
+      if (notes.trim()) {
+        const { error: notesError } = await (supabase
+          .from('workout_notes') as any)
+          .insert({
+            workout_id: workoutId,
+            notes: notes.trim(),
+            strikes_mentioned: generatedTags
+          });
 
-              return total + techniqueXP;
-            }, 0);
-
-          } else if (combo.type === 'Skipping') {
-            baseXP = 50;
-          }
-          
-          // Apply multipliers based on mode
-          if (combo.mode === 'Reps' && combo.sets && combo.reps) {
-            baseXP *= parseInt(combo.sets);
-          } else if (combo.mode === 'Rounds' && combo.rounds) {
-            baseXP *= parseInt(combo.rounds);
-          } else if (combo.mode === 'Time') {
-            const minutes = parseInt(combo.minutes || '0');
-            const seconds = parseInt(combo.seconds || '0');
-            const totalMinutes = Math.max(1, minutes + seconds / 60);
-            baseXP *= totalMinutes;
-          }
-
-          return {
-            ...combo,
-            xp: Math.round(baseXP)
-          };
-        }),
-        notes: {
-          text: notes.trim(),
-          strikes_mentioned: generatedTags
-        },
-        totalXP: 0
-      };
-      
-      // Calculate total XP
-      workoutData.totalXP = workoutData.combos.reduce((sum, combo) => sum + (combo as any).xp, 0);
-      
-      // Navigate to XP summary with the workout data
-      router.push({
-        pathname: "/create-workout/xp-summary",
-        params: {
-          workoutData: JSON.stringify(workoutData)
+        if (notesError) {
+          console.error('Error saving notes:', notesError);
         }
-      });
-    } catch (error) {
-      console.error('Error processing workout:', error);
-      // TODO: Show error toast/alert to user
+      }
+
+      // 3. Create all combos
+      const comboInserts = combos.map((combo: any, index: number) => ({
+        workout_id: workoutId,
+        sequence_number: index + 1,
+        training_type: combo.type,
+        training_mode: combo.mode,
+        sets: combo.sets ? parseInt(combo.sets) || 1 : null,
+        reps: combo.reps ? parseInt(combo.reps) || 1 : null,
+        duration_minutes: combo.minutes ? parseInt(combo.minutes) || 0 : null,
+        duration_seconds: combo.seconds ? parseInt(combo.seconds) || 0 : null,
+        rounds: combo.rounds ? parseInt(combo.rounds) || 1 : null,
+        round_minutes: combo.roundMinutes ? parseInt(combo.roundMinutes) || 0 : null,
+        round_seconds: combo.roundSeconds ? parseInt(combo.roundSeconds) || 0 : null,
+        techniques: combo.techniques ? combo.techniques.split(' - ') : null,
+        xp: 0,
+        completed: true,
+        distance: combo.distance ? parseFloat(combo.distance) || null : null,
+        distance_unit: combo.distanceUnit || null
+      }));
+
+      if (comboInserts.length > 0) {
+        const { error: combosError } = await (supabase
+          .from('workout_combos') as any)
+          .insert(comboInserts);
+
+        if (combosError) throw combosError;
+      }
+
+      // Navigate home
+      router.replace('/(tabs)');
+    } catch (err) {
+      console.error('Error saving workout:', err);
+      setError('Failed to save workout. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -268,6 +206,10 @@ export default function NotesScreen() {
               }}
               editable={!isProcessing}
             />
+
+            {error && (
+              <ThemedText style={styles.errorText}>{error}</ThemedText>
+            )}
             
             {/* Continue Button */}
             <TouchableOpacity 
@@ -340,5 +282,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     borderTopColor: '#FFD700',
+  },
+  errorText: {
+    color: '#ff3b30',
+    fontFamily: 'Poppins',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
   },
 }); 

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState, useRef, useEffect } from 'react';
-import { StyleSheet, TextInput, TouchableOpacity, Animated, Easing, Pressable } from 'react-native';
+import { StyleSheet, TextInput, TouchableOpacity, Animated, Easing, Pressable, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -143,27 +143,11 @@ export default function NameWorkoutScreen() {
             })
           }
         ]}>
-          <ThemedView style={styles.buttonWrapper}>
-            <Animated.View style={[
-              styles.rotatingCircle,
-              {
-                transform: [{
-                  rotate: rotateAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '360deg']
-                  })
-                }]
-              }
-            ]} />
-            <TouchableOpacity 
-              style={styles.optionButton}
-              onPress={handleVoice}>
-              <IconSymbol 
-                name="mic" 
-                size={28} 
-                color="#fff"
-              />
-            </TouchableOpacity>
+          <TouchableOpacity style={styles.optionRow} onPress={handleVoice}>
+            <View style={styles.optionInfo}>
+              <ThemedText style={styles.optionLabel}>Voice Input</ThemedText>
+              <ThemedText style={styles.optionDesc}>Record techniques with voice</ThemedText>
+            </View>
             <Animated.View style={[
               styles.chevronContainer,
               {
@@ -175,35 +159,15 @@ export default function NameWorkoutScreen() {
                 }]
               }
             ]}>
-              <IconSymbol 
-                name="chevron.right" 
-                size={32} 
-                color="#fff"
-              />
+              <IconSymbol name="chevron.right" size={28} color="#666" />
             </Animated.View>
-          </ThemedView>
+          </TouchableOpacity>
 
-          <ThemedView style={styles.buttonWrapper}>
-            <Animated.View style={[
-              styles.rotatingCircle,
-              {
-                transform: [{
-                  rotate: rotateAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '360deg']
-                  })
-                }]
-              }
-            ]} />
-            <TouchableOpacity 
-              style={styles.optionButton}
-              onPress={handleManual}>
-              <IconSymbol 
-                name="hand.draw" 
-                size={28} 
-                color="#fff"
-              />
-            </TouchableOpacity>
+          <TouchableOpacity style={styles.optionRow} onPress={handleManual}>
+            <View style={styles.optionInfo}>
+              <ThemedText style={styles.optionLabel}>Manual Entry</ThemedText>
+              <ThemedText style={styles.optionDesc}>Select techniques yourself</ThemedText>
+            </View>
             <Animated.View style={[
               styles.chevronContainer,
               {
@@ -215,13 +179,9 @@ export default function NameWorkoutScreen() {
                 }]
               }
             ]}>
-              <IconSymbol 
-                name="chevron.right" 
-                size={32} 
-                color="#fff"
-              />
+              <IconSymbol name="chevron.right" size={28} color="#666" />
             </Animated.View>
-          </ThemedView>
+          </TouchableOpacity>
         </Animated.View>
       </ThemedView>
     </ThemedView>
@@ -249,8 +209,8 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   headerText: {
-    fontSize: 42,
-    lineHeight: 52,
+    fontSize: 28,
+    lineHeight: 36,
   },
   nameText: {
     textDecorationLine: 'line-through',
@@ -261,8 +221,8 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   headerInput: {
-    fontSize: 42,
-    lineHeight: 52,
+    fontSize: 28,
+    lineHeight: 36,
     fontFamily: 'Poppins',
     fontWeight: '700',
     padding: 0,
@@ -273,45 +233,35 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     position: 'absolute',
-    bottom: '50%',
-    right: 16,
-    gap: 24,
+    top: '35%',
+    left: 24,
+    right: 24,
+    gap: 10,
   },
-  buttonWrapper: {
-    width: 88,
-    height: 88,
+  optionRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 12,
+    padding: 18,
+    gap: 14,
   },
-  optionButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#262626',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+  optionInfo: {
+    flex: 1,
   },
-  rotatingCircle: {
-    position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    borderTopColor: '#FFD700',
+  optionLabel: {
+    fontFamily: 'PoppinsSemiBold',
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 3,
+  },
+  optionDesc: {
+    fontFamily: 'Poppins',
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
   },
   chevronContainer: {
-    position: 'absolute',
-    right: -45,
-    top: '50%',
-    transform: [{ translateY: -16 }],
+    // used for animated chevron on voice option
   },
 }); 

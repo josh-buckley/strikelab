@@ -6,6 +6,9 @@ import { supabaseStorage } from './supabaseStorage';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
+// Debug logging for Supabase connection
+console.log('Supabase URL configured:', supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'NOT SET');
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: supabaseStorage,
