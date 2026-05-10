@@ -21,11 +21,9 @@ import {
   fetchWeeklyRounds,
   fetchWeeklyRoundsBreakdown,
   fetchRecentWorkout,
-  fetchRecentTemplates,
   fetchTopCombo,
   QuickStats,
   RecentWorkout,
-  RecentTemplate,
   TopCombo,
 } from '@/lib/dashboardService';
 
@@ -34,12 +32,11 @@ const CARD_GAP = 12;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - CARD_GAP) / 2;
 
 export default function HomeScreen() {
-  const { signOut, session } = useAuth();
+  const { session } = useAuth();
 
   const [quickStats, setQuickStats] = useState<QuickStats | null>(null);
   const [roundsBreakdown, setRoundsBreakdown] = useState({ sparring: 0, partner: 0, pads: 0 });
   const [recentWorkout, setRecentWorkout] = useState<RecentWorkout | null>(null);
-  const [recentTemplates, setRecentTemplates] = useState<RecentTemplate[]>([]);
   const [topCombo, setTopCombo] = useState<TopCombo | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
 
@@ -66,18 +63,16 @@ export default function HomeScreen() {
     try {
       setDataLoading(true);
       const userId = session!.user.id;
-      const [stats, rounds, breakdown, workout, templates, combo] = await Promise.all([
+      const [stats, rounds, breakdown, workout, combo] = await Promise.all([
         fetchQuickStats(userId),
         fetchWeeklyRounds(userId),
         fetchWeeklyRoundsBreakdown(userId),
         fetchRecentWorkout(userId),
-        fetchRecentTemplates(userId, 3),
         fetchTopCombo(userId),
       ]);
       setQuickStats(stats);
       setRoundsBreakdown(breakdown);
       setRecentWorkout(workout);
-      setRecentTemplates(templates);
       setTopCombo(combo);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -104,8 +99,8 @@ export default function HomeScreen() {
         <ThemedText type="title" style={styles.title}>
           strikelab
         </ThemedText>
-        <TouchableOpacity onPress={async () => { await signOut(); router.replace('/(auth)/login'); }} style={styles.headerButton}>
-          <IconSymbol name="rectangle.portrait.and.arrow.right" size={20} color="#666" />
+        <TouchableOpacity onPress={() => router.push('/account')} style={styles.headerButton}>
+          <IconSymbol name="person.circle" size={20} color="#666" />
         </TouchableOpacity>
       </View>
 
@@ -171,7 +166,7 @@ export default function HomeScreen() {
                 <View style={styles.sessionRight}>
                   <ThemedText style={styles.coachLabel}>Coach Tip</ThemedText>
                   {recentWorkout?.notes ? (
-                    <ThemedText style={styles.coachFeedback} numberOfLines={3}>
+                    <ThemedText style={styles.coachFeedback}>
                       "{recentWorkout.notes}"
                     </ThemedText>
                   ) : (
@@ -208,20 +203,6 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {/* Templates */}
-            {recentTemplates.length > 0 && (
-              <>
-                <ThemedText style={styles.sectionTitle}>Templates</ThemedText>
-                {recentTemplates.map((tpl, i) => (
-                  <TouchableOpacity key={tpl.id} style={[styles.templateRow, i < recentTemplates.length - 1 && styles.templateRowBorder]}>
-                    <IconSymbol name="doc.text" size={18} color="#666" />
-                    <ThemedText style={styles.templateName}>{tpl.name}</ThemedText>
-                    <IconSymbol name="chevron.right" size={16} color="#333" />
-                  </TouchableOpacity>
-                ))}
-              </>
-            )}
-
             <View style={{ height: 120 }} />
           </>
         )}
@@ -237,7 +218,7 @@ export default function HomeScreen() {
               r={42}
               stroke="#FFD700"
               strokeWidth={1.5}
-              strokeDasharray="22 10"
+              strokeDasharray="14 6"
               fill="none"
             />
           </Svg>
@@ -289,6 +270,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     minHeight: 140,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,215,0,0.05)',
   },
   cardTitle: {
     fontFamily: 'Poppins',
@@ -337,6 +320,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,215,0,0.05)',
   },
 
   // Session two-column layout
@@ -346,10 +331,10 @@ const styles = StyleSheet.create({
   },
   sessionLeft: { flex: 1 },
   sessionRight: {
-    flex: 1,
+    flex: 1.3,
     borderLeftWidth: 1,
     borderLeftColor: '#2c2c2e',
-    paddingLeft: 16,
+    paddingLeft: 14,
     justifyContent: 'flex-start',
   },
   sessionName: {
@@ -404,35 +389,6 @@ const styles = StyleSheet.create({
     color: '#999',
     fontStyle: 'italic',
     lineHeight: 17,
-  },
-
-  // Section title (for templates)
-  sectionTitle: {
-    fontFamily: 'Poppins',
-    fontSize: 12,
-    color: '#666',
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    marginBottom: 4,
-    marginTop: 8,
-  },
-
-  // Templates
-  templateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  templateRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#2c2c2e',
-  },
-  templateName: {
-    fontFamily: 'Poppins',
-    fontSize: 15,
-    color: '#fff',
-    flex: 1,
   },
 
   // Empty / loading

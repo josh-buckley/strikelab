@@ -1,11 +1,9 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts, Poppins_400Regular, Poppins_600SemiBold } from '@expo-google-fonts/poppins';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, useRef } from 'react';
 import 'react-native-reanimated';
-import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -20,21 +18,15 @@ import { usePaywall } from '@/contexts/PaywallContext';
 // Define the onboarding completed key to match the one in AuthProvider
 const ONBOARDING_COMPLETED_KEY = 'strikelab_onboarding_completed';
 
-// Keep the splash screen visible while we fetch resources
-SplashScreen.preventAutoHideAsync().catch(() => {
-  console.warn('Error preventing splash screen auto-hide');
-});
-
 function Layout() {
   const colorScheme = useColorScheme();
   const { session, loading: authLoading } = useAuth();
   const { isSubscribed, loading: subscriptionLoading, checkJustSubscribedFlag, clearJustSubscribedFlag } = usePaywall();
   const segments = useSegments();
   const router = useRouter();
-  const [isPreloading, setIsPreloading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
   const hasNavigatedAfterSubscription = useRef(false);
-  const [loaded] = useFonts({
+  const [fontsLoaded] = useFonts({
     Poppins: Poppins_400Regular,
     PoppinsSemiBold: Poppins_600SemiBold,
   });
@@ -46,45 +38,16 @@ function Layout() {
   }, []);
 
   useEffect(() => {
-    console.log('Layout loading check:', {
-      loaded,
-      authLoading,
-      subscriptionLoading,
-      isPreloading
-    });
-    
-    if (loaded && !authLoading && !subscriptionLoading) {
-      // Add a small delay to ensure smooth transition
-      console.log('Starting preloading timeout');
-      const timer = setTimeout(() => {
-        console.log('Preloading timeout complete, setting isPreloading false');
-        setIsPreloading(false);
-      }, 1500);
-
-      return () => clearTimeout(timer);
+    if (fontsLoaded) {
+      console.log('Fonts loaded');
     }
-  }, [loaded, authLoading, subscriptionLoading]);
-
-  useEffect(() => {
-    console.log('Splash screen effect check:', {
-      loaded,
-      isPreloading
-    });
-    
-    if (loaded && !isPreloading) {
-      // Hide the splash screen after everything is loaded
-      console.log('Attempting to hide splash screen');
-      SplashScreen.hideAsync().catch((error) => {
-        console.error('Error hiding splash screen:', error);
-      });
-    }
-  }, [loaded, isPreloading]);
+  }, [fontsLoaded]);
 
   // Effect for handling navigation logic
   useEffect(() => {
     // Wait until all loading states are false and component is mounted
-    if (!isMounted || authLoading || subscriptionLoading || isPreloading || !loaded) {
-      console.log('Layout: Navigation effect waiting...', { isMounted, authLoading, subscriptionLoading, isPreloading, loaded });
+    if (!isMounted || authLoading || (session && subscriptionLoading && !isSubscribed)) {
+      console.log('Layout: Navigation effect waiting...', { isMounted, authLoading, subscriptionLoading, hasSession: !!session, isSubscribed });
       return;
     }
 
@@ -127,7 +90,7 @@ function Layout() {
           // Logged in and subscribed
           console.log('Layout: User IS subscribed.');
           // If they are not already in the main app section, AND not navigating to create-workout, redirect them there.
-          if (!inTabsGroup && segments[0] !== 'create-workout') {
+          if (!inTabsGroup && segments[0] !== 'create-workout' && segments[0] !== 'voice-test') {
             console.log('Layout: Redirecting subscribed user to (tabs) (excluding create-workout)');
             router.replace('/(tabs)');
           } else {
@@ -170,11 +133,7 @@ function Layout() {
     };
 
     handleNavigation();
-  }, [session, isSubscribed, authLoading, subscriptionLoading, segments, isMounted, isPreloading, loaded, router, checkJustSubscribedFlag, clearJustSubscribedFlag]);
-
-  if (!loaded || isPreloading) {
-    return <View style={{ flex: 1, backgroundColor: colorScheme === 'dark' ? '#000' : '#fff' }} />;
-  }
+  }, [session, isSubscribed, authLoading, subscriptionLoading, segments, isMounted, router, checkJustSubscribedFlag, clearJustSubscribedFlag]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -202,6 +161,20 @@ function Layout() {
               options={{
                 headerShown: false,
                 animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen
+              name="voice-test"
+              options={{
+                headerShown: false,
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen
+              name="account"
+              options={{
+                headerShown: false,
+                animation: 'slide_from_right',
               }}
             />
             <Stack.Screen name="+not-found" />

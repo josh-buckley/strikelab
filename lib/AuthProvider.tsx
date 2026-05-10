@@ -4,6 +4,7 @@ import { View } from 'react-native';
 import { supabase } from './supabase';
 import { Database } from './database.types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureUserProfile } from './userProfile';
 
 type UserProfile = Database['public']['Tables']['users']['Row'];
 
@@ -15,6 +16,7 @@ type AuthContextType = {
   error: string | null;
   initialized: boolean;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   markOnboardingCompleted: () => Promise<void>;
   checkOnboardingCompleted: () => Promise<boolean>;
@@ -31,6 +33,7 @@ const AuthContext = createContext<AuthContextType>({
   error: null,
   initialized: false,
   signOut: async () => {},
+  deleteAccount: async () => {},
   refreshProfile: async () => {},
   markOnboardingCompleted: async () => {},
   checkOnboardingCompleted: async () => false,
@@ -134,6 +137,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function deleteAccount() {
+    try {
+      setState(prev => ({ ...prev, loading: true, error: null }));
+      const { error } = await supabase.rpc('delete_account');
+      if (error) throw error;
+      await supabase.auth.signOut();
+      setState({
+        user: null,
+        session: null,
+        profile: null,
+        loading: false,
+        error: null,
+        initialized: true,
+      });
+    } catch (error) {
+      console.error('AuthProvider: Error deleting account:', error);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof AuthError ? error.message : 'Failed to delete account',
+        loading: false,
+      }));
+      throw error;
+    }
+  }
+
   // Sign out function
   async function signOut() {
     try {
@@ -169,13 +197,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initial session check
   useEffect(() => {
     console.log('AuthProvider: Starting initial session check');
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      console.log('AuthProvider: Initial session check complete', { 
-        hasSession: !!session, 
-        error: error?.message,
-        userId: session?.user?.id 
+
+    // Add timeout to prevent hanging indefinitely
+    const timeoutId = setTimeout(() => {
+      console.log('AuthProvider: Session check timed out after 10s');
+      setState(prev => {
+        if (!prev.initialized) {
+          return {
+            ...prev,
+            error: 'Connection timed out. Please check your internet connection.',
+            loading: false,
+            initialized: true,
+          };
+        }
+        return prev;
       });
-      
+    }, 10000);
+
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+      clearTimeout(timeoutId);
+      console.log('AuthProvider: Initial session check complete', {
+        hasSession: !!session,
+        error: error?.message,
+        userId: session?.user?.id
+      });
+
       if (error) {
         console.error('AuthProvider: Session check error:', error);
         setState(prev => ({
@@ -196,10 +242,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }));
 
       if (session?.user) {
+        console.log('AuthProvider: Ensuring profile for user:', session.user.id);
+        try {
+          const result = await ensureUserProfile(session.user);
+          if (!result.success) {
+            console.warn('AuthProvider: ensureUserProfile failed on initial session check:', result.error);
+          }
+        } catch (profileError) {
+          console.error('AuthProvider: ensureUserProfile threw on initial session check:', profileError);
+        }
         console.log('AuthProvider: Fetching profile for user:', session.user.id);
         fetchProfile(session.user.id);
       }
     }).catch(error => {
+      clearTimeout(timeoutId);
       console.error('AuthProvider: Unexpected error during session check:', error);
       setState(prev => ({
         ...prev,
@@ -221,6 +277,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }));
 
       if (event === 'SIGNED_IN' && session?.user) {
+        console.log('AuthProvider: Ensuring profile for signed-in user:', session.user.id);
+        try {
+          const result = await ensureUserProfile(session.user);
+          if (!result.success) {
+            console.warn('AuthProvider: ensureUserProfile failed on SIGNED_IN:', result.error);
+          }
+        } catch (profileError) {
+          console.error('AuthProvider: ensureUserProfile threw on SIGNED_IN:', profileError);
+        }
         await fetchProfile(session.user.id);
       } else if (event === 'SIGNED_OUT') {
         console.log('AuthProvider: Processing SIGNED_OUT event');
@@ -284,6 +349,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const contextValue = {
     ...state,
     signOut,
+    deleteAccount,
     refreshProfile,
     markOnboardingCompleted,
     checkOnboardingCompleted,
